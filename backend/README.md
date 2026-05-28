@@ -307,6 +307,29 @@ All variables are optional unless marked required.
 | `MULTIMODAL_MAX_ATTACHED_FILES` | `4` | Max files attached per chat message |
 | `MULTIMODAL_MAX_ATTACHED_BYTES` | `12582912` (12 MB) | Max total bytes attached per message |
 
+### Local AI stack
+
+All optional; every flag defaults to the OpenAI behaviour. See [Local RAG stack](#local-rag-stack).
+
+| Variable | Default | Description |
+|---|---|---|
+| `AI_PROVIDER` | `openai` | Router provider: `openai` or `local` (OpenRouter) |
+| `RAG_DUAL_WRITE` | off | `1` to also chunk+embed uploads into Weaviate at ingest time |
+| `RAG_SHADOW` | off | `1` to run observe-only local retrieval alongside the OpenAI answer |
+| `RAG_RETRIEVAL` | `openai` | `local` replaces hosted `file_search` with injected Weaviate context |
+| `RAG_GENERATION` | `openai` | `local` routes generation to OpenRouter (no hosted tools) |
+| `OPENROUTER_API_KEY` | — | Required when `AI_PROVIDER=local` or `RAG_GENERATION=local` |
+| `LLM_MODEL` | `google/gemini-2.5-pro` | OpenRouter generation model |
+| `LLM_BASE_URL` | OpenRouter URL | Override for any OpenAI-compatible endpoint (Ollama, vLLM) |
+| `ROUTER_MODEL_LOCAL` | `openai/gpt-4o-mini` | OpenRouter model for intent routing |
+| `WEAVIATE_HOST` / `WEAVIATE_PORT` | `localhost` / `8090` | Weaviate location (`weaviate` / `8080` in Docker) |
+| `BGE_MODEL_NAME` | `sentence-transformers/all-MiniLM-L6-v2` | Embedding model (re-ingest if changed) |
+| `RERANKER_MODEL_NAME` | `BAAI/bge-reranker-v2-m3` | Cross-encoder reranker model |
+| `RAG_RETRIEVAL_MODE` / `_TOP_K` / `_CANDIDATES` | `hybrid` / `8` / `30` | Retrieval tuning (local mode) |
+| `RAG_SHADOW_MODE` / `_TOP_K` / `_CANDIDATES` | `hybrid` / `8` / `30` | Shadow retrieval tuning |
+| `RAG_CACHE_DIR` | `backend/data/rag_cache` | Docling parse cache + shadow JSONL log |
+| `RAG_EMBED_DEVICE` | `cpu` | Set `cuda` to run embeddings/reranker on GPU |
+
 ---
 
 ## API Reference
@@ -460,6 +483,22 @@ PUT /  →  SkillsFirstChatBot.skills_first_conversation(chatLog, dataLayout)
 | `conversational` | General chat, no document lookup needed |
 | `geospatial` | Triggers GeoMCPClient for map / polygon tools |
 
+### Generation paths (flag-dependent)
+
+The `rag`/`multi_query`/`conversational` branch chooses a generation path:
+
+- **Default** — `run_multimodal_conversation()` on the OpenAI Responses API
+  (`file_search` + `code_interpreter` + `web_search` + attachments).
+- **`RAG_RETRIEVAL=local`** — same Responses pipeline, but the hosted `file_search`
+  tool is dropped; relevant chunks are retrieved from Weaviate and injected into the
+  prompt, and the documents footer is built from chunk title/page. `code_interpreter`,
+  `web_search`, and attachments still work.
+- **`RAG_GENERATION=local`** — `run_local_conversation()`: local retrieval + OpenRouter
+  chat-completions streaming. No hosted tools or attachments; the WS frame contract
+  (`start`/`stream`/`end`) is identical.
+
+All three emit the same WS frames, so the frontend is unchanged.
+
 ---
 
 ## Document Ingestion Pipeline
@@ -495,6 +534,83 @@ POST /ingest-pdf  (multipart)
   ├─ Upload original bytes to S3  → s3Key
   └─ Save document record to Firestore  (extractionStatus = "rag_ready")
 ```
+
+When `RAG_DUAL_WRITE=1`, each handler additionally (best-effort, fire-and-forget)
+parses/chunks/embeds the document into Weaviate scoped to the conversation —
+PDFs via Docling, JSON/GeoJSON via the converted Markdown. This runs in parallel
+with the authoritative OpenAI path and never blocks the completion event.
+
+---
+
+## Local RAG stack
+
+An optional local replacement for OpenAI's hosted RAG, ported from a reference
+prototype. **Every flag defaults to the OpenAI behaviour**, so the backend is
+unchanged unless you opt in. The pieces live under `app/rag/`.
+
+### What each flag does
+
+| Flag (default) | Replaces | With |
+|---|---|---|
+| `AI_PROVIDER=local` | OpenAI intent router | OpenRouter (`classify_json`) |
+| `RAG_DUAL_WRITE=1` | — (additive) | also indexes uploads into Weaviate |
+| `RAG_SHADOW=1` | — (observe-only) | logs local-vs-OpenAI retrieval to `rag_cache/shadow_log.jsonl` |
+| `RAG_RETRIEVAL=local` | hosted `file_search` | Weaviate hybrid (BM25+vector) + BGE reranker, injected into the prompt |
+| `RAG_GENERATION=local` | OpenAI Responses generation | OpenRouter chat-completions streaming |
+
+`AI_PROVIDER` (router) and `RAG_GENERATION` (answer) are independent axes, so the
+router and generator can be flipped to local separately.
+
+### Components (`app/rag/`)
+
+- **embedder.py** — `sentence-transformers` MiniLM (384-dim, normalised, CPU). Singleton model.
+- **reranker.py** — BGE `bge-reranker-v2-m3` cross-encoder.
+- **ocr.py** — Docling layout-aware PDF parse (sections, tables, page numbers).
+- **chunking.py** — structure-aware splitting (heading → paragraph → sentence → char).
+- **store/** — Weaviate collection `RagDocumentChunk`, client-side (self-provided) vectors.
+- **providers/** — `LLMProvider` (OpenAI + OpenRouter) with `classify_json` and `stream_chat`.
+- **ingest_document.py** — dual-write helpers (PDF/markdown → chunks → Weaviate).
+- **shadow.py** — observe-only shadow retrieval.
+
+### Per-conversation scoping
+
+Every chunk carries `memoryId` (and `documentId`); `retrieve()` always filters by
+`memoryId`, so a conversation only ever sees its own chunks — mirroring the
+per-conversation isolation of the OpenAI vector stores. Deleting a conversation
+(`DELETE /conversations/{memory_id}`) also runs `delete_by_memory()` when
+`RAG_DUAL_WRITE` is on.
+
+### Bring up Weaviate
+
+```bash
+# from repo root — starts the weaviate service from docker-compose
+docker compose up -d weaviate
+curl http://localhost:8090/v1/.well-known/ready    # expect 200
+```
+
+### Standalone CLIs (validation / ops)
+
+```bash
+cd backend
+.venv/bin/python -m app.rag.store.ingest   --chunks path/to/chunks.json --memory-id <id>
+.venv/bin/python -m app.rag.store.retrieve --query "…" --memory-id <id>
+.venv/bin/python -m app.rag.store.verify
+```
+
+### Recommended rollout
+
+`RAG_DUAL_WRITE=1` → `RAG_SHADOW=1` (compare) → `RAG_RETRIEVAL=local` →
+`RAG_GENERATION=local`. Each step is reversible by unsetting its flag.
+
+### Limitations
+
+- Local generation has no `code_interpreter` / `web_search` and does not send
+  image/file attachments to the model (text + retrieved context only).
+- Docling runs with OCR off, so scanned/image-only PDFs yield little local text
+  (a local vision model is future work).
+- Changing `BGE_MODEL_NAME` invalidates existing vectors — re-ingest.
+- Run a single backend worker (the local models are in-process singletons; blocking
+  calls already run via `asyncio.to_thread`).
 
 ---
 
@@ -569,28 +685,21 @@ docker run -p 5029:5029 polisense-api
 > For production deployments, prefer mounting them as secrets or using environment
 > variables (`FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY`) instead.
 
-### docker-compose (with frontend)
+### docker-compose (with frontend + Weaviate)
 
-Add a `docker-compose.yml` at the repo root if you want to run both services together:
+The repo-root `docker-compose.yml` runs `backend`, `frontend`, and `weaviate`
+together (see the root `README.md` for full URL wiring):
 
-```yaml
-services:
-  backend:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
-    ports:
-      - "5029:5029"
-    env_file: backend/.env.production
-
-  frontend:
-    build:
-      context: frontend
-    ports:
-      - "3000:3000"
-    environment:
-      - RESEARCH_API_URL=http://backend:5029
-      - NEXT_PUBLIC_RESEARCH_WS_URL=ws://backend:5029/ws
-    depends_on:
-      - backend
+```bash
+# from repo root
+docker compose up -d --build
 ```
+
+The backend reaches Weaviate at `weaviate:8080` (set via `WEAVIATE_HOST`/
+`WEAVIATE_PORT` in the compose file). Weaviate is started for convenience but is
+inert until the local RAG flags are enabled.
+
+> The backend image now bundles the local-stack deps (`torch`, `sentence-
+> transformers`, `docling`), so the build is larger and slower than before. To
+> keep it lean for a cloud-only (OpenAI) deployment, omit those lines from
+> `requirements.txt` — nothing imports them unless the RAG flags are set.
