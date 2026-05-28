@@ -139,6 +139,32 @@ GROUNDING:
             {"sender": "bot", "type": type, "data": ({"message": message} if message else None)}
         )
 
+    def _maybe_schedule_shadow(
+        self,
+        user_last_message: str,
+        routing_data: dict[str, Any],
+        doc_context: dict[str, Any],
+    ) -> None:
+        """Fire-and-forget local retrieval for offline comparison. No-op (and no
+        heavy import) unless RAG_SHADOW is on and this is a document-grounded turn."""
+        from app.rag.shadow import shadow_enabled
+
+        if not shadow_enabled() or not self.memory_id:
+            return
+        if routing_data.get("intent") not in ("rag", "multi_query"):
+            return
+        if not (doc_context.get("vectorStoreId") or doc_context.get("hasReadyDocuments")):
+            return
+
+        query = (routing_data.get("rewrittenUserQuestionVectorDatabaseSearch") or "").strip() or user_last_message
+
+        async def _run() -> None:
+            from app.rag.shadow import safe_shadow
+
+            await asyncio.to_thread(safe_shadow, query, self.memory_id)
+
+        asyncio.create_task(_run())
+
     async def run_multimodal_conversation(
         self,
         user_last_message: str,
@@ -152,6 +178,11 @@ GROUNDING:
             len(doc_context.get("attachableFileIds") or []),
             len(doc_context.get("imageFileIds") or []),
         )
+
+        # Shadow retrieval (Milestone C) — observe-only. Runs the local Weaviate
+        # retrieve concurrently with the OpenAI answer below; never affects it.
+        # Gated by RAG_SHADOW; only fires on document-grounded RAG turns.
+        self._maybe_schedule_shadow(user_last_message, routing_data, doc_context)
 
         history_messages = self._build_history_messages(chat_log_without_last)
         system_prompt = self._multimodal_system_prompt(doc_context)
