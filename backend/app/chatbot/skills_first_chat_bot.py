@@ -28,6 +28,7 @@ from app.chatbot.geo_utils import (
     lat_lon_to_utm,
 )
 from app.chatbot.router import PsRagRouter
+from app.rag.providers import get_provider
 from app.services.firestore_memory_service import FirestoreMemoryService
 
 logger = logging.getLogger("polisense.chatbot")
@@ -1065,7 +1066,7 @@ GROUNDING:
         logger.info("MESSAGE [%s] — %s", _sender, user_last_message[:200])
         chat_log_without_last = chat_log[:-1]
 
-        router = PsRagRouter(self.openai_client)
+        router = PsRagRouter(get_provider())
         routing_data = await router.get_routing_data(
             user_last_message, data_layout, json.dumps(chat_log_without_last, default=str)
         )

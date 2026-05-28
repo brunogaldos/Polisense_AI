@@ -151,6 +151,64 @@ async def _cleanup_conversation_artifacts(memory: dict, memory_id: str) -> None:
         except Exception as e:  # noqa: BLE001
             logger.warning("Could not delete vector store %s: %s", vs_id, e)
 
+    # Best-effort: drop the conversation's chunks from the local Weaviate store
+    # too. Gated by RAG_DUAL_WRITE so it's a no-op (no heavy import) when the
+    # local stack isn't in use.
+    if _dual_write_on():
+        try:
+            from app.rag.store.ingest import delete_by_memory
+
+            await asyncio.to_thread(delete_by_memory, memory_id)
+            logger.info("Deleted Weaviate chunks for conversation %s", memory_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Weaviate cleanup failed for %s (non-fatal): %s", memory_id, e)
+
+
+# ---------------------------------------------------------------------------
+# Dual-write side-channel (Milestone B). When RAG_DUAL_WRITE is on, document
+# ingestion ALSO parses/chunks/embeds into the local Weaviate store, in parallel
+# with the authoritative OpenAI vector-store path. Fire-and-forget so it never
+# delays the user-facing completion event; lazy imports keep torch/Docling out
+# of the startup path when the flag is off.
+# ---------------------------------------------------------------------------
+
+
+def _dual_write_on() -> bool:
+    return (os.getenv("RAG_DUAL_WRITE") or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _schedule_dual_write_pdf(
+    file_buffer: bytes, original_name: str, mime_type: str, memory_id: str, file_id: str
+) -> None:
+    is_pdf = mime_type == "application/pdf" or bool(re.search(r"\.pdf$", original_name or "", re.IGNORECASE))
+    if not (_dual_write_on() and memory_id and is_pdf):
+        return
+
+    async def _run() -> None:
+        from app.rag.ingest_document import safe_dual_write_pdf
+
+        await asyncio.to_thread(
+            safe_dual_write_pdf, file_buffer, original_name, memory_id, file_id
+        )
+
+    asyncio.create_task(_run())
+
+
+def _schedule_dual_write_markdown(
+    markdown: str, file_name: str, memory_id: str, file_id: str
+) -> None:
+    if not (_dual_write_on() and memory_id and (markdown or "").strip()):
+        return
+
+    async def _run() -> None:
+        from app.rag.ingest_document import safe_dual_write_markdown
+
+        await asyncio.to_thread(
+            safe_dual_write_markdown, markdown, file_name, memory_id, file_id
+        )
+
+    asyncio.create_task(_run())
+
 
 # ---------------------------------------------------------------------------
 # Ingestion (GeoJSON + JSON) — ports the fire-and-forget pipeline from
@@ -294,6 +352,9 @@ async def _process_geojson_ingestion(
             "text/plain",
         )
 
+        # Dual-write the rich feature text into the local store (best-effort, gated).
+        _schedule_dual_write_markdown(full_text, file_name, memory_id, file_id)
+
         # Register doc for download tracking — non-fatal.
         doc: dict[str, Any] = {
             "id": file_id,
@@ -403,6 +464,9 @@ async def _process_json_ingestion(
                     logger.warning("Vector store upload failed (non-fatal): %s", e)
 
             asyncio.create_task(_upload_md())
+
+        # Dual-write the converted Markdown into the local store (best-effort, gated).
+        _schedule_dual_write_markdown(markdown, file_name, memory_id, file_id)
 
         await broadcast_ws_event(
             "ragIngestionCompleted",
@@ -631,6 +695,9 @@ async def _process_pdf_ingestion(
             )
         except Exception as e:  # noqa: BLE001
             logger.warning("Final status update failed: %s", e)
+
+        # Dual-write the original PDF into the local store (best-effort, gated).
+        _schedule_dual_write_pdf(file_buffer, original_name, mime_type, memory_id, file_id)
 
         await broadcast_ws_event(
             "ragIngestionCompleted",

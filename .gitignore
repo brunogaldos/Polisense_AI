@@ -3,3 +3,10 @@ backend/mcp-service/data/chinisau/output/
 .codex/
 .claude/
 backend/mcp-service/data/chinisau/
+
+# Local RAG stack runtime cache (Docling parses, figures, chunk json)
+backend/data/rag_cache/
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -9,15 +9,16 @@ intent ∈ {rag, multi_query, conversational, geospatial}.
 
 import json
 import logging
-import os
 from typing import Any
 
 logger = logging.getLogger("polisense.chatbot")
 
 
 class PsRagRouter:
-    def __init__(self, openai_client: Any) -> None:
-        self.client = openai_client
+    def __init__(self, provider: Any) -> None:
+        # `provider` is an LLMProvider (app.rag.providers). With AI_PROVIDER=openai
+        # (default) this is behaviour-identical to the previous direct client call.
+        self.provider = provider
 
     def _system_message(self, schema: str, about: str, chat_history: str) -> str:
         return f"""You are an expert user question analyzer for a RAG based chatbot.
@@ -72,29 +73,18 @@ JSON Output:
     async def get_routing_data(
         self, user_question: str, data_layout: dict[str, Any], chat_history: str
     ) -> dict[str, Any]:
-        if not self.client:
-            logger.error("Router has no OpenAI client — defaulting to rag")
+        if not self.provider or not getattr(self.provider, "available", False):
+            logger.error("Router has no available provider — defaulting to rag")
             return {"intent": "rag", "primaryCategory": "", "rewrittenUserQuestionVectorDatabaseSearch": ""}
 
-        model = os.getenv("ROUTER_MODEL", "gpt-4o-mini")
-        logger.info("ROUTER — model=%s question=%r", model, user_question[:150])
+        logger.info("ROUTER — question=%r", user_question[:150])
         system = self._system_message(
             json.dumps(data_layout.get("categories") or []),
             data_layout.get("aboutProject") or "",
             chat_history,
         )
         try:
-            resp = await self.client.chat.completions.create(
-                model=model,
-                temperature=0,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": self._user_message(user_question)},
-                ],
-            )
-            content = resp.choices[0].message.content or "{}"
-            routing = json.loads(content)
+            routing = await self.provider.classify_json(system, self._user_message(user_question))
         except Exception as e:  # noqa: BLE001 - any failure degrades to plain rag
             logger.warning("Routing failed (%s) — defaulting to rag", e)
             routing = {}
