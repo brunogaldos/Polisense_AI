@@ -1,0 +1,58 @@
+@import 'css/settings';
+
+.c-explore-datasets-actions {
+    display: flex;
+    background: transparent; // Clean transparent background
+    backdrop-filter: blur(8px); // Glassmorphism effect
+
+    button {
+        &:not(:last-child) {
+            margin-right: $space;
+        }
+        
+        // Override button backgrounds to match new color scheme
+        &.c-button.-secondary.-compressed {
+            background-color: transparent !important;
+            color: #4effd0 !important; // Turquoise text color
+            fill: #4effd0 !important; // Turquoise icon color
+            border: 1px solid rgba(78, 255, 208, 0.3) !important; // Subtle turquoise border
+            border-radius: 4px !important; // Ensure border radius is maintained
+            
+            // Override hover and active states
+            &:hover {
+                background-color: rgba(78, 255, 208, 0.1) !important;
+                color: #4effd0 !important;
+                fill: #4effd0 !important;
+                border-color: rgba(78, 255, 208, 0.6) !important;
+            }
+            
+            &:active {
+                background-color: rgba(78, 255, 208, 0.15) !important;
+                color: #4effd0 !important;
+                fill: #4effd0 !important;
+            }
+        }
+        
+        &.c-button.-primary.-compressed {
+            background-color: rgba(78, 255, 208, 0.15) !important;
+            color: #4effd0 !important; // Turquoise text color
+            fill: #4effd0 !important; // Turquoise icon color
+            border: 1px solid #4effd0 !important; // Solid turquoise border for active state
+            border-radius: 4px !important; // Ensure border radius is maintained
+            
+            // Override hover and active states
+            &:hover {
+                background-color: rgba(78, 255, 208, 0.25) !important;
+                color: #4effd0 !important;
+                fill: #4effd0 !important;
+                border-color: #4effd0 !important;
+            }
+            
+            &:active {
+                background-color: rgba(78, 255, 208, 0.3) !important;
+                color: #4effd0 !important;
+                fill: #4effd0 !important;
+            }
+        }
+    }
+}

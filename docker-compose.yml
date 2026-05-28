@@ -1,0 +1,27 @@
+services:
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "5029:5029"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Server-side: Next.js API proxy → backend container (Docker DNS)
+        RESEARCH_API_URL: http://backend:5029
+        # Browser-side WebSocket: connects directly from the browser to the exposed port
+        NEXT_PUBLIC_RESEARCH_WS_URL: ws://localhost:5029/ws
+        # NEXT_PUBLIC_RESEARCH_API_URL is intentionally NOT set here.
+        # It defaults to /api inside the app, which routes through the Next.js proxy
+        # above — keeping all HTTP traffic inside the Docker network.
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped

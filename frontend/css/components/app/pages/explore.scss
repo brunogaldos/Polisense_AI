@@ -1,0 +1,252 @@
+.c-page-explore {
+  display: flex;
+  min-height: calc(100vh - #{$header-main-height}); // Changed from fixed height to min-height
+  overflow: visible; // Allow content to extend beyond
+
+  .explore-sidebar {
+    display: flex;
+    overflow: visible; // Allow sidebar content to extend beyond
+    width: auto; // Don't constrain width
+  }
+
+  .explore-sidebar-content {
+    min-width: 360px; // Increased by 20px to show white border
+    max-width: 360px; // Increased by 20px to show white border
+    position: absolute;
+    top: 15px; // Keep the top reduction that was working well
+    left: 13px; // Position after the menu panel (180px width) - pushed 167px left total
+    height: calc(100vh - 85px) !important; // 15px from bottom + 15px from top (55px header + 15px top + 15px bottom)
+    z-index: 2;
+    overflow: visible; // Allow content to extend beyond
+    right: auto; // Ensure no right constraint
+  }
+
+  .clear-polygon-container {
+    z-index: 2;
+    position: absolute;
+    top: calc(#{$header-main-height} + 30px);
+    left: calc(530px + (30px * 2));
+  }
+}
+
+/* Glass panel styling */
+.panel-style {
+  background: #44546a;
+  backdrop-filter: blur(8px);
+  border-radius: 12px;
+  border: 2px solid #4effd0; // Turquoise border for modern look
+  color: #ffffff;
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  box-shadow: 0 8px 32px rgba(68, 84, 106, 0.3);
+  min-height: calc(100vh - 85px) !important; // 15px from bottom + 15px from top (55px header + 15px top + 15px bottom)
+  box-sizing: border-box; /* Ensures padding doesn't shrink the element */
+  overflow-y: auto; // Enable vertical scrolling
+  max-height: calc(100vh - 85px) !important; // 15px from bottom + 15px from top (55px header + 15px top + 15px bottom)
+  padding-bottom: 20px; // Reduced padding to avoid compounding
+  padding-top: 15px; // Add padding to align scrollbar with panel top
+  padding-right: 8px; // Add padding to make scrollbar width visible
+  position: relative; // Enable absolute positioning for close button
+  
+  /* Custom scrollbar styling to match new color theme */
+  &::-webkit-scrollbar {
+    width: 16px; // Increased from 12px to make scrollbar wider
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    margin-top: 15px; // Align track with panel boundaries
+    margin-bottom: 15px; // Align track with panel boundaries
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4effd0; // Solid turquoise color
+    border-radius: 4px;
+    
+    &:hover {
+      background: rgba(78, 255, 208, 0.8); // Slightly transparent on hover
+    }
+  }
+  
+  /* Firefox scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: #4effd0 rgba(255, 255, 255, 0.15);
+}
+
+/* Additional specific scrollbar styling for dataset list container */
+.explore-sidebar-content {
+  /* Custom scrollbar styling to match UI theme */
+  &::-webkit-scrollbar {
+    width: 16px !important; // Increased to match main panel
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 4px !important;
+    margin-top: 15px !important; // Align with panel boundaries
+    margin-bottom: 15px !important; // Align with panel boundaries
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4effd0 !important; // Pure turquoise color
+    border-radius: 4px !important;
+    border: none !important;
+    
+    &:hover {
+      background: #4effd0 !important; // Keep turquoise on hover
+    }
+    
+    &:active {
+      background: #4effd0 !important; // Keep turquoise when pressed/active
+    }
+  }
+  
+  /* Firefox scrollbar styling */
+  scrollbar-width: thin !important;
+  scrollbar-color: #4effd0 rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Even more specific targeting for dataset list scrollbar */
+.c-explore-datasets .c-explore-dataset-list {
+  &::-webkit-scrollbar {
+    width: 16px !important; // Increased to match main panel
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 4px !important;
+    margin-top: 15px !important; // Align with panel boundaries
+    margin-bottom: 15px !important; // Align with panel boundaries
+  }
+  
+  &::-webkit-scrollbar-thumb {
+    background: #4effd0 !important; // Pure turquoise color
+    border-radius: 4px !important;
+    border: none !important;
+    
+    &:hover {
+      background: #4effd0 !important; // Keep turquoise on hover
+    }
+    
+    &:active {
+      background: #4effd0 !important; // Keep turquoise when pressed/active
+    }
+  }
+  
+  /* Firefox scrollbar styling */
+  scrollbar-width: thin !important;
+  scrollbar-color: #4effd0 rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Global scrollbar override to prevent any red scrollbars */
+* {
+  &::-webkit-scrollbar-thumb {
+    background: #4effd0 !important; // Force turquoise on all scrollbars
+    border-radius: 4px !important;
+    border: none !important;
+    
+    &:hover {
+      background: #4effd0 !important;
+    }
+    
+    &:active {
+      background: #4effd0 !important;
+    }
+  }
+  
+  &::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.1) !important;
+    border-radius: 4px !important;
+  }
+  
+  scrollbar-color: #4effd0 rgba(255, 255, 255, 0.1) !important;
+}
+
+/* Floating AI Assistant button */
+.research-btn {
+  position: fixed;
+  bottom: 20px;
+  right: 8px;
+  z-index: 999999;
+  background: #44546a;
+  color: #FFFFFF; // Pure white color
+  padding: 12px 16px;
+  font-size: 14px;
+  border: 1px solid #FFFFFF; // White border
+  border-radius: 6px; // Slightly rounded like Climate TRACE
+  cursor: pointer;
+  font-family: 'Inter', 'Roboto', 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 500; // Medium weight
+  text-transform: uppercase; // Uppercase like Climate TRACE
+  letter-spacing: 0.1em; // Exact letter spacing
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
+
+  .ai-button-icon {
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+  }
+}
+
+.research-btn:hover {
+  background: #44546a; // Keep same background color on hover
+  border-color: #4effd0;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(68, 84, 106, 0.3), 0 0 20px rgba(78, 255, 208, 0.6), 0 0 40px rgba(78, 255, 208, 0.4);
+}
+
+// Close button for glass panel
+.panel-close-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(78, 255, 208, 0.15);
+  border: 1px solid #4effd0;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 12px;
+  color: #ffffff;
+  z-index: 10;
+  transition: all 0.2s ease;
+
+  // Invisible expanded hit area — extends the clickable region 10px in every
+  // direction so users don't need pixel-perfect aim. Final click target is
+  // ~48px square while the visible chip stays small and unobtrusive.
+  &::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    bottom: -10px;
+    left: -10px;
+  }
+
+  &:hover {
+    background: rgba(78, 255, 208, 0.25);
+    border-color: #4effd0;
+    transform: scale(1.1);
+    box-shadow: 0 0 10px rgba(78, 255, 208, 0.3);
+  }
+
+  .c-icon {
+    width: 10px;
+    height: 10px;
+    fill: #4effd0;
+    font-weight: 300;
+  }
+}
+
+// Hide arrow button when sidebar is open (only show X button)
+.c-sidebar.-open .btn-toggle {
+  display: none !important;
+}

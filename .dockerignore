@@ -1,0 +1,80 @@
+# Git
+.git
+.gitignore
+
+# Node modules (will be installed fresh in container)
+**/node_modules
+**/.npm
+
+# Build outputs (will be built fresh in container)
+**/ts-out
+**/dist
+**/.next
+**/build
+**/.turbo
+
+# Development files
+**/.env.local
+**/.env.development
+**/.env.test
+**/coverage
+**/.nyc_output
+
+# IDE and editor files
+**/.vscode
+**/.idea
+**/*.swp
+**/*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+**/__tests__
+**/*.test.ts
+**/*.test.js
+**/*.spec.ts
+**/*.spec.js
+
+# Documentation (not needed in container)
+docs/
+*.md
+!backend/README.md
+
+# Frontend (not needed for backend image)
+frontend/
+dashboard/
+
+# Logs
+**/*.log
+**/logs/
+
+# Temporary files
+**/tmp/
+**/.cache/
+**/temp/
+
+# Python cache
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+
+# Docker files (avoid recursive copying)
+**/Dockerfile*
+**/docker-compose*
+**/.dockerignore
+
+# Large unnecessary files
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.rar
+
+# Backup files
+**/*.bak
+**/*.backup
+**/*.old

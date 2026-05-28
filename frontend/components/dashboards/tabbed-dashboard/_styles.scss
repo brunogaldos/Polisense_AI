@@ -1,0 +1,875 @@
+// Dashboard Page Styles
+.c-dashboard-page {
+  width: 100%;
+  height: calc(100vh - #{$header-main-height});
+  background: #f8f9fa;
+  overflow: hidden;
+  transition: width 0.3s ease;
+
+  &__container {
+    width: 100%;
+    height: 100%;
+    padding: 20px;
+    overflow-y: auto;
+  }
+
+  // When chat is open, resize the dashboard to make room
+  &.-chat-open {
+    width: calc(100% - 400px); // Reserve space for the chatbot (typically 400px wide)
+    
+    @media (max-width: 768px) {
+      width: calc(100% - 300px); // Smaller space on mobile
+    }
+  }
+}
+
+// Dashboard-specific header positioning fix
+.l-page.-dashboard-page .l-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+}
+
+// Layout adjustments when chat is open
+.l-layout-app.-chat-open {
+  .c-dashboard-page {
+    width: calc(100% - 400px);
+    
+    @media (max-width: 768px) {
+      width: calc(100% - 300px);
+    }
+  }
+}
+
+// Tabbed Dashboard Container
+.c-tabbed-dashboard-container {
+  width: 100%;
+  height: calc(100vh - #{$header-main-height});
+  padding: 20px;
+  background: #f8f9fa;
+  overflow-y: auto;
+}
+
+// Report Dashboard Styles
+.c-report-dashboard {
+  width: 100%;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+
+  &__header {
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: #fff;
+    padding: 40px 32px;
+    text-align: center;
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      margin-top: 0;
+    }
+
+    p {
+      font-size: 18px;
+      opacity: 0.9;
+      margin: 0;
+      max-width: 800px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+  }
+
+  &__content {
+    padding: 0;
+  }
+}
+
+// Report Section Styles
+.c-report-section {
+  padding: 40px 32px;
+  border-bottom: 1px solid #e9ecef;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  // Add visual separation between sections
+  &:not(:last-child)::after {
+    content: '';
+    display: block;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #007bff, transparent);
+    margin: 20px -32px 0 -32px;
+  }
+}
+
+// Stakeholders Tab Styles
+.c-stakeholders-tab {
+  &__header {
+    margin-bottom: 32px;
+    text-align: center;
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #6c757d;
+      font-size: 16px;
+    }
+  }
+
+  &__table-container {
+    overflow-x: auto;
+    margin-bottom: 32px;
+  }
+
+  &__summary {
+    margin-top: 32px;
+  }
+}
+
+.c-stakeholders-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+
+  th {
+    background: #007bff;
+    color: #fff;
+    padding: 16px 12px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  td {
+    padding: 16px 12px;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: top;
+  }
+
+  tr:hover {
+    background: #f8f9fa;
+  }
+
+  &__stakeholder {
+    font-weight: 600;
+    color: #2c3e50;
+  }
+
+  &__type {
+    .c-tag {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+
+      &--national {
+        background: #e3f2fd;
+        color: #1976d2;
+      }
+
+      &--regional {
+        background: #f3e5f5;
+        color: #7b1fa2;
+      }
+
+      &--local-government {
+        background: #e8f5e8;
+        color: #388e3c;
+      }
+
+      &--community {
+        background: #fff3e0;
+        color: #f57c00;
+      }
+
+      &--private {
+        background: #fce4ec;
+        color: #c2185b;
+      }
+    }
+  }
+
+  &__power {
+    .c-power-indicator {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+
+      &--high-powers {
+        background: #ffebee;
+        color: #d32f2f;
+      }
+
+      &--shared-powers {
+        background: #fff8e1;
+        color: #f57c00;
+      }
+
+      &--no-powers-but-high-need-or-interest {
+        background: #e8f5e8;
+        color: #388e3c;
+      }
+    }
+  }
+
+  &__contact {
+    a {
+      color: #007bff;
+      text-decoration: none;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+}
+
+.c-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+}
+
+.c-summary-card {
+  background: #f8f9fa;
+  padding: 24px;
+  border-radius: 8px;
+  border-left: 4px solid #007bff;
+
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-size: 18px;
+  }
+
+  p {
+    color: #6c757d;
+    margin: 0;
+  }
+}
+
+// Mapping Data Tab Styles
+.c-mapping-data-tab {
+  &__header {
+    margin-bottom: 32px;
+    text-align: center;
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #6c757d;
+      font-size: 16px;
+    }
+  }
+
+  &__content {
+    display: grid;
+    gap: 32px;
+  }
+}
+
+.c-data-categories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.c-data-category {
+  background: #f8f9fa;
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 16px;
+    font-size: 18px;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+
+    li {
+      padding: 8px 0;
+      border-bottom: 1px solid #e9ecef;
+      color: #495057;
+
+      &:last-child {
+        border-bottom: none;
+      }
+
+      &:before {
+        content: "•";
+        color: #007bff;
+        font-weight: bold;
+        margin-right: 8px;
+      }
+    }
+  }
+}
+
+.c-mapping-tools {
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 24px;
+    font-size: 20px;
+  }
+}
+
+.c-tools-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 24px;
+}
+
+.c-tool-card {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  text-align: center;
+  transition: transform 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+
+  h4 {
+    color: #2c3e50;
+    margin-bottom: 12px;
+    font-size: 18px;
+  }
+
+  p {
+    color: #6c757d;
+    margin-bottom: 20px;
+  }
+}
+
+// Barriers and Policies Tab Styles
+.c-barriers-policies-tab {
+  &__header {
+    margin-bottom: 32px;
+    text-align: center;
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #6c757d;
+      font-size: 16px;
+    }
+  }
+
+  &__content {
+    display: grid;
+    gap: 40px;
+  }
+}
+
+.c-barriers-section,
+.c-policies-section,
+.c-recommendations-section {
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 24px;
+    font-size: 20px;
+    border-bottom: 2px solid #007bff;
+    padding-bottom: 8px;
+  }
+}
+
+.c-barriers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.c-barrier-card {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  border-left: 4px solid #dc3545;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+
+  &--high {
+    border-left-color: #dc3545;
+  }
+
+  &--medium {
+    border-left-color: #ffc107;
+  }
+
+  &--low {
+    border-left-color: #28a745;
+  }
+
+  h4 {
+    color: #2c3e50;
+    margin-bottom: 12px;
+    font-size: 18px;
+  }
+
+  p {
+    color: #6c757d;
+    margin-bottom: 16px;
+  }
+}
+
+.c-barrier-metrics {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+
+  .c-metric {
+    background: #f8f9fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #495057;
+  }
+}
+
+.c-policies-timeline {
+  position: relative;
+  padding-left: 40px;
+
+  &:before {
+    content: "";
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #007bff;
+  }
+}
+
+.c-policy-item {
+  position: relative;
+  margin-bottom: 32px;
+
+  &:before {
+    content: "";
+    position: absolute;
+    left: -32px;
+    top: 8px;
+    width: 12px;
+    height: 12px;
+    background: #007bff;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 2px #007bff;
+  }
+}
+
+.c-policy-year {
+  position: absolute;
+  left: -80px;
+  top: 4px;
+  background: #007bff;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.c-policy-content {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+
+  h4 {
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-size: 16px;
+  }
+
+  p {
+    color: #6c757d;
+    margin: 0;
+  }
+}
+
+.c-recommendations-list {
+  display: grid;
+  gap: 20px;
+}
+
+.c-recommendation {
+  background: #e8f5e8;
+  padding: 20px;
+  border-radius: 8px;
+  border-left: 4px solid #28a745;
+
+  h4 {
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-size: 16px;
+  }
+
+  p {
+    color: #495057;
+    margin: 0;
+  }
+}
+
+// EAP Interventions Tab Styles
+.c-eap-interventions-tab {
+  &__header {
+    margin-bottom: 32px;
+    text-align: center;
+
+    h2 {
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: #6c757d;
+      font-size: 16px;
+    }
+  }
+
+  &__content {
+    display: grid;
+    gap: 40px;
+  }
+}
+
+.c-interventions-overview {
+  margin-bottom: 40px;
+}
+
+.c-overview-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 24px;
+}
+
+.c-stat-card {
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  color: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  text-align: center;
+
+  h3 {
+    font-size: 36px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  p {
+    font-size: 14px;
+    opacity: 0.9;
+    margin: 0;
+  }
+}
+
+.c-interventions-categories {
+  display: grid;
+  gap: 40px;
+}
+
+.c-category-section {
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 24px;
+    font-size: 20px;
+    border-bottom: 2px solid #007bff;
+    padding-bottom: 8px;
+  }
+}
+
+.c-intervention-list {
+  display: grid;
+  gap: 20px;
+}
+
+.c-intervention-item {
+  background: #fff;
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+
+  &:hover {
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  }
+}
+
+.c-intervention-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+
+  h4 {
+    color: #2c3e50;
+    margin: 0;
+    font-size: 18px;
+  }
+}
+
+.c-status {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+
+  &--active {
+    background: #d4edda;
+    color: #155724;
+  }
+
+  &--completed {
+    background: #cce5ff;
+    color: #004085;
+  }
+
+  &--planning {
+    background: #fff3cd;
+    color: #856404;
+  }
+}
+
+.c-intervention-metrics {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+
+  .c-metric {
+    background: #f8f9fa;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: #495057;
+  }
+}
+
+.c-interventions-timeline {
+  h3 {
+    color: #2c3e50;
+    margin-bottom: 24px;
+    font-size: 20px;
+    border-bottom: 2px solid #007bff;
+    padding-bottom: 8px;
+  }
+}
+
+.c-timeline {
+  position: relative;
+  padding-left: 40px;
+
+  &:before {
+    content: "";
+    position: absolute;
+    left: 20px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #007bff;
+  }
+}
+
+.c-timeline-item {
+  position: relative;
+  margin-bottom: 32px;
+
+  &:before {
+    content: "";
+    position: absolute;
+    left: -32px;
+    top: 8px;
+    width: 12px;
+    height: 12px;
+    background: #007bff;
+    border-radius: 50%;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 2px #007bff;
+  }
+}
+
+.c-timeline-date {
+  position: absolute;
+  left: -80px;
+  top: 4px;
+  background: #007bff;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.c-timeline-content {
+  background: #f8f9fa;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid #e9ecef;
+
+  h4 {
+    color: #2c3e50;
+    margin-bottom: 8px;
+    font-size: 16px;
+  }
+
+  p {
+    color: #6c757d;
+    margin: 0;
+  }
+}
+
+// Button Styles
+.c-button {
+  display: inline-block;
+  padding: 12px 24px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &--primary {
+    background: #007bff;
+    color: #fff;
+
+    &:hover {
+      background: #0056b3;
+    }
+  }
+
+  &--secondary {
+    background: #6c757d;
+    color: #fff;
+
+    &:hover {
+      background: #545b62;
+    }
+  }
+}
+
+// Responsive Design
+@media (max-width: 768px) {
+  .c-tabbed-dashboard {
+    &__tabs {
+      flex-direction: column;
+    }
+
+    &__tab {
+      border-bottom: none;
+      border-right: 3px solid transparent;
+
+      &.-active {
+        border-right-color: #007bff;
+        border-bottom-color: transparent;
+      }
+    }
+
+    &__content {
+      padding: 20px;
+    }
+  }
+
+  .c-overview-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .c-data-categories {
+    grid-template-columns: 1fr;
+  }
+
+  .c-barriers-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .c-tools-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .c-summary-cards {
+    grid-template-columns: 1fr;
+  }
+}
+
+// Dashboard Page Controls
+.c-dashboard-page__controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #dee2e6;
+  margin-bottom: 20px;
+}
+
+.c-dashboard-page__back-button {
+  background: #6c757d;
+  color: #fff;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  &:hover {
+    background: #5a6268;
+    transform: translateY(-1px);
+  }
+}
+
+.c-dashboard-page__dashboard-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.c-dashboard-page__dashboard-badge {
+  background: linear-gradient(135deg, #007bff, #0056b3);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  box-shadow: 0 2px 4px rgba(0, 123, 255, 0.3);
+}

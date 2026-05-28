@@ -1,0 +1,105 @@
+FROM node:16.17-alpine
+LABEL maintainer="hello@vizzuality.com"
+
+ARG NEXT_PUBLIC_AUTH_CALLBACK=https://resourcewatch.org/auth-callback
+ARG NEXTAUTH_URL=https://resourcewatch.org
+ARG NEXTAUTH_JWT_SECRET=thisIsAVeryBadSecret
+ARG NEXT_PUBLIC_RW_GOGGLE_API_TOKEN_SHORTENER=AIzaSyBSGdCZzfKZa0aJX0M8l16kLyRM8moq-JI
+ARG NEXT_PUBLIC_RW_MAPBOX_API_TOKEN=pk.eyJ1IjoibWF0dGVhOTkiLCJhIjoiY2xkY2V0eHF2MDhhYjNub2Jya2h0dHh5diJ9.fXChvC5vSrDhDaNNLLbb0w
+ARG NEXT_PUBLIC_GLOBAL_FISHING_WATCH_TOKEN=not_valid
+ARG NEXT_PUBLIC_WRI_API_URL=https://api.resourcewatch.org
+ARG NEXT_PUBLIC_FEATURE_FLAG_GEDC_DASHBOARD=false
+ARG NEXT_PUBLIC_API_ENV=production
+ARG NEXT_PUBLIC_ENVS_SHOW=production
+ARG NEXT_PUBLIC_ENVS_EDIT=production
+ARG NEXT_PUBLIC_RESEARCH_WS_URL
+ARG NEXT_PUBLIC_RESEARCH_API_URL
+# Server-side URL used by the Next.js API proxy routes to reach the backend container.
+# In docker-compose this should be the backend service name, e.g. http://backend:5029
+ARG RESEARCH_API_URL=http://backend:5029
+
+ENV NEXT_PUBLIC_ADD_SEARCH_KEY=ea4c79622844ade140170b141c36f14f
+ENV NEXT_PUBLIC_API_ENV=$NEXT_PUBLIC_API_ENV
+ENV NEXT_PUBLIC_APPLICATIONS=rw
+ENV NEXT_PUBLIC_BITLY_TOKEN=e3076fc3bfeee976efb9966f49383e1a8fb71c5f
+ENV NEXT_PUBLIC_AUTH_CALLBACK=$NEXT_PUBLIC_AUTH_CALLBACK
+ENV NEXTAUTH_URL=$NEXTAUTH_URL
+ENV NEXTAUTH_JWT_SECRET=$NEXTAUTH_JWT_SECRET
+ENV NODE_ENV=production
+ENV NEXT_PUBLIC_GOOGLE_TAG_MANAGER_CONTAINER_ID=GTM-NVTC933
+ENV NEXT_PUBLIC_RW_GOGGLE_API_TOKEN_SHORTENER=$NEXT_PUBLIC_RW_GOGGLE_API_TOKEN_SHORTENER
+ENV NEXT_PUBLIC_RW_MAPBOX_API_TOKEN=$NEXT_PUBLIC_RW_MAPBOX_API_TOKEN
+ENV NEXT_PUBLIC_GLOBAL_FISHING_WATCH_TOKEN=$NEXT_PUBLIC_GLOBAL_FISHING_WATCH_TOKEN
+ENV NEXT_PUBLIC_WRI_API_URL=$NEXT_PUBLIC_WRI_API_URL
+ENV NEXT_PUBLIC_FEATURE_FLAG_GEDC_DASHBOARD=$NEXT_PUBLIC_FEATURE_FLAG_GEDC_DASHBOARD
+ENV NEXT_PUBLIC_ENVS_SHOW=$NEXT_PUBLIC_ENVS_SHOW
+ENV NEXT_PUBLIC_ENVS_EDIT=$NEXT_PUBLIC_ENVS_EDIT
+ENV NEXT_PUBLIC_RESEARCH_WS_URL=$NEXT_PUBLIC_RESEARCH_WS_URL
+ENV NEXT_PUBLIC_RESEARCH_API_URL=$NEXT_PUBLIC_RESEARCH_API_URL
+ENV RESEARCH_API_URL=$RESEARCH_API_URL
+
+RUN apk update && apk add --no-cache \
+        build-base gcc bash git \
+    cairo-dev pango-dev jpeg-dev
+
+# Add app directory
+WORKDIR /usr/src/app
+
+# Copy app folders
+COPY components ./components
+COPY constants ./constants
+COPY contexts ./contexts
+COPY css ./css
+COPY hooks ./hooks
+COPY hoc ./hoc
+COPY layout ./layout
+COPY lib ./lib
+COPY modules ./modules
+COPY pages ./pages
+COPY public ./public
+COPY redactions ./redactions
+COPY selectors ./selectors
+COPY services ./services
+COPY server ./server
+COPY utils ./utils
+COPY types ./types
+COPY firebase ./firebase
+# Only copy Yarn binary, not cache/state files (they cause V8 deserialization errors)
+COPY .yarn/releases ./.yarn/releases
+
+# Copy single files
+COPY .browserlistrc .
+# Copy .env.production if it exists, otherwise we'll create it from build args
+COPY .env.production* ./
+COPY yarn.lock .
+COPY .yarnrc.yml .
+COPY index.js .
+COPY next-env.d.ts .
+COPY react-jsx.d.ts .
+COPY next.config.js .
+COPY package.json .
+COPY postcss.config.js .
+COPY tailwind.config.js .
+COPY tsconfig.json .
+
+RUN yarn install --immutable
+
+# Create or update .env.production with NEXT_PUBLIC_* variables from build args
+# This ensures Next.js can read them during build (NEXT_PUBLIC_* vars must be available at build time)
+# Note: ENV vars set from ARGs are available during RUN commands, so we use them directly
+RUN touch .env.production && \
+    if [ -n "$NEXT_PUBLIC_RESEARCH_WS_URL" ]; then \
+      echo "NEXT_PUBLIC_RESEARCH_WS_URL=$NEXT_PUBLIC_RESEARCH_WS_URL" >> .env.development; \
+    fi && \
+    if [ -n "$NEXT_PUBLIC_RESEARCH_API_URL" ]; then \
+      echo "NEXT_PUBLIC_RESEARCH_API_URL=$NEXT_PUBLIC_RESEARCH_API_URL" >> .env.development; \
+    fi && \
+    if [ -n "$NEXT_PUBLIC_AUTH_CALLBACK" ]; then \
+      echo "NEXT_PUBLIC_AUTH_CALLBACK=$NEXT_PUBLIC_AUTH_CALLBACK" >> .env.development; \
+    fi
+
+RUN yarn build
+
+EXPOSE 3000
+
+CMD ["yarn", "start"]

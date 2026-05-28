@@ -1,0 +1,50 @@
+# Mac OS
+.DS_Store
+
+# Text editors
+*.sublime*
+.sublime*
+.vscode*
+
+# Vendors
+/node_modules
+
+# Logs
+*.log*
+
+# Compiled files
+/.next
+
+# Environmental variables
+.env
+.env*.local
+.env.development
+.env.production
+.env*
+!*.example
+# cypress
+/cypress/screenshots
+/cypress/videos
+
+# coverage
+.nyc_output
+coverage
+coverage.json
+
+# storybook
+storybook-static
+public/styles
+
+# eslint
+.eslintcache
+
+# Typescript
+tsconfig.tsbuildinfo
+
+# Yarn
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions

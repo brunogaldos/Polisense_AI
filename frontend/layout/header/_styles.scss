@@ -1,0 +1,103 @@
+@import 'css/settings';
+
+.l-header {
+  background-color: #44546a; // Updated background color
+  backdrop-filter: blur(10px);
+  background-image: none; // Remove gradient
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  z-index: 10000;
+
+  &.-transparent {
+    background-image: none;
+    background-color: transparent;
+  }
+
+  .header-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    height: $header-main-height-mobile;
+    position: relative;
+
+    @media screen and (min-width: map-get($breakpoints, medium)) {
+      height: $header-main-height;
+    }
+  }
+
+  .header-logo {
+    position: relative;
+    margin-left: -630px;
+
+    .brand-title {
+      display: block;
+      color: #FFFFFF; // Pure white color
+      font-family: 'Inter', 'Roboto', 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+      font-size: 16px;
+      font-weight: 500; // Medium weight
+      margin: 0;
+      text-transform: uppercase;
+      letter-spacing: 0.1em; // Exact letter spacing
+      line-height: 1.2;
+    }
+  }
+
+  .header-menu {
+    transform: translateX(650px);
+    
+    ul {
+      display: flex;
+      align-items: center;
+
+      > li {
+
+        &:not(:first-child) {
+          margin-left: $margin-size-extra-small;
+        }
+
+        > a,
+        > span,
+        > button {
+          display: inline-flex;
+          align-items: center;
+          padding: 7px 10px;
+          color: #FFFFFF; // Pure white color
+          fill: #FFFFFF;
+          cursor: pointer;
+          font-family: 'Inter', 'Roboto', 'Montserrat', 'Helvetica Neue', Arial, sans-serif;
+          font-size: 14px;
+          font-weight: 500; // Medium weight
+          text-transform: uppercase;
+          letter-spacing: 0.1em; // Exact letter spacing
+          line-height: 1.2;
+
+          &:hover {
+            color: $yellow;
+            fill: $yellow;
+            text-decoration: none;
+          }
+        }
+
+        &.-active > a {
+          position: relative;
+          color: $yellow;
+          fill: $yellow;
+          font-weight: 500; // Medium weight
+          text-decoration: none;
+
+          &:after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translate(-50%, 0);
+            width: calc(100% - 20px);
+            height: 2px;
+            background: $yellow;
+          }
+        }
+      }
+    }
+  }
+}

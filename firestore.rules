@@ -1,0 +1,30 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // User profiles - users can read/write their own profile
+    match /users/{userId} {
+      // Users can read and write their own profile
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow creation of own profile
+      allow create: if request.auth != null && 
+        request.auth.uid == userId &&
+        request.resource.data.uid == request.auth.uid;
+    }
+    
+    // Chatbot memories - users can only access their own
+    match /chatbot_memories/{memoryId} {
+      // Users can read/write their own memories
+      allow read, write: if request.auth != null && 
+        (resource == null || resource.data.userId == request.auth.uid);
+      
+      // Allow creation with userId matching auth.uid
+      allow create: if request.auth != null && 
+        request.resource.data.userId == request.auth.uid;
+      
+      // Allow unauthenticated reads for backward compatibility during migration
+      // This should be removed once migration is complete
+      allow read: if request.auth == null;
+    }
+  }
+}

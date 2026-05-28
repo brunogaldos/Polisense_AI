@@ -1,0 +1,10 @@
+.env
+.env.production
+serviceAccountKey.json
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+dist/
+.pytest_cache/

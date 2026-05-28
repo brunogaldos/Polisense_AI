@@ -1,0 +1,54 @@
+/* Glowing Cursor Effect */
+.cursor-glow {
+  position: fixed !important;
+  width: 30px !important;
+  height: 30px !important;
+  background: radial-gradient(circle, rgba(64, 224, 208, 0.9) 0%, rgba(64, 224, 208, 0.6) 50%, rgba(64, 224, 208, 0.2) 100%) !important;
+  border-radius: 50% !important;
+  pointer-events: none !important;
+  z-index: 2147483647 !important;
+  transition: all 0.1s ease-out !important;
+  mix-blend-mode: screen !important;
+  filter: blur(0.5px) !important;
+  box-shadow: 
+    0 0 25px rgba(64, 224, 208, 0.8) !important,
+    0 0 50px rgba(64, 224, 208, 0.6) !important,
+    0 0 75px rgba(64, 224, 208, 0.4) !important,
+    0 0 100px rgba(64, 224, 208, 0.2) !important;
+  transform: translate(-50%, -50%) !important;
+}
+
+.cursor-glow.hidden {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+/* Hide default cursor on elements that have the glow effect */
+body.has-cursor-glow {
+  cursor: none;
+}
+
+body.has-cursor-glow * {
+  cursor: none;
+}
+
+/* Show default cursor on interactive elements */
+body.has-cursor-glow button,
+body.has-cursor-glow a,
+body.has-cursor-glow input,
+body.has-cursor-glow textarea,
+body.has-cursor-glow select,
+body.has-cursor-glow [role="button"],
+body.has-cursor-glow [tabindex] {
+  cursor: pointer;
+}
+
+/* Enhanced glow effect for interactive elements */
+.cursor-glow.interactive {
+  background: radial-gradient(circle, rgba(64, 224, 208, 1) 0%, rgba(64, 224, 208, 0.6) 50%, transparent 100%);
+  box-shadow: 
+    0 0 25px rgba(64, 224, 208, 0.8),
+    0 0 50px rgba(64, 224, 208, 0.6),
+    0 0 75px rgba(64, 224, 208, 0.4);
+  transform: scale(1.2);
+}

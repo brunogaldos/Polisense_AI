@@ -1,0 +1,30 @@
+{
+  "jsonUrls": [
+
+  ],
+  "documentUrls": [
+  ],
+  "categories": [
+    "Electrical Easements",
+    "Energy Projects",
+    "Renewable Energy",
+    "Solar Energy",
+    "Wind Energy",
+    "Energy Infrastructure",
+    "Transmission Lines",
+    "Legal Procedures",
+    "Administrative Documents",
+    "Property Rights",
+    "Land Registry",
+    "Property Compensation",
+    "Government Regulations",
+    "Project Development",
+    "Technical Engineering",
+    "Energy Concessions",
+    "Infrastructure Development",
+    "Regional Government",
+    "Arequipa Region",
+    "Energy Transmission"
+  ],
+  "aboutProject": "This RAG system provides comprehensive documentation and information about electrical easement requests (servidumbre eléctrica) for energy projects in the Arequipa region of Peru. The system contains detailed legal and administrative documents including requests for establishment of electrical easements, energy project information (solar and wind), property registry data, technical justifications, economic analyses, and property compensation agreements. Users can query specific projects, understand legal procedures, analyze property impacts, examine technical requirements, review compensation agreements, and access information about energy infrastructure development. The documents cover various energy projects including solar and wind installations, transmission line infrastructure, property rights, land registry information, and government regulatory procedures managed by the Gerencia Regional de Energía y Minas (GREM) of the Gobierno Regional de Arequipa."
+}

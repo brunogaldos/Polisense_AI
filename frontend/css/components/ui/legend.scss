@@ -1,0 +1,101 @@
+.c-legend-map {
+  position: fixed; // Place relative to viewport so it can sit under the left panels
+  bottom: 10px;
+  left: 375px; // Move to bottom-left corner - pushed 265px right total (was 360px)
+  right: auto;
+  width: 340px; // Fit neatly within left corner space
+  max-width: 360px;
+  background: #44546a;
+  z-index: 9;
+  border-radius: 4px;
+
+  &.-embed {
+    right: $space-1 * 2;
+  }
+
+  @media screen and (min-width: $grid-row-width) {
+    width: 100%;
+    min-width: 400px;
+  }
+
+  .legend-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0;
+    padding: 10px 15px;
+    text-transform: uppercase;
+    color: #4effd0;
+    font-weight: $font-weight-regular;
+    font-size: 11px;
+  }
+
+  .toggle-legend {
+    position: absolute;
+    right: 0px;
+    width: 40px;
+    height: 32px;
+    top: -28px;
+    border: 0;
+    border-radius: 2px 2px 0 0;
+    background-color: rgba(78, 255, 208, 0.15);
+    cursor: pointer;
+
+    &:focus { outline: none; }
+
+    svg {
+      margin-top: 4px;
+      fill: #4effd0;
+    }
+  }
+
+  .open-legend {
+    display: flex;
+    flex-flow: column;
+    max-height: 300px;
+    height: 0;
+    overflow: hidden;
+    opacity: 0;
+    // Without an auto height, the legend looks a bit 💩
+    // but we can't animate the height if max-height is
+    // used
+    // I've prefered to remove the animation than having
+    // a legend too tall - Clément
+
+    &.-active {
+      height: auto;
+      opacity: 1;
+      overflow: auto;
+    }
+
+    > .legend-list {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      overflow: auto;
+    }
+  }
+
+  .close-legend {
+    display: none;
+
+    &.-active {
+      display: inherit;
+    }
+
+    .toggle-legend {
+      position: relative;
+      top: auto;
+      padding: 0;
+      width: auto;
+      height: auto;
+      padding: 0;
+      background-color: $white;
+
+      svg {
+        margin-top: 0;
+        fill: $blue-grey;
+      }
+    }
+  }
+}

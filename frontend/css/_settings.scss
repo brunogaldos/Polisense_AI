@@ -1,0 +1,108 @@
+// Colors
+@import 'foundation_settings';
+
+
+$accent-orange: #ff7849;
+$accent-blue: #4da6ff;
+$accent-purple: #a78bfa;
+$accent-green: #34d399;
+
+$charcoal-grey: #1e1e1e;
+$dove-grey: #717171;
+$light-grey: #caccd0;
+$white: #ffffff;
+
+// Typography
+// NOTE: redeclared lower in this file (line ~72) — that later declaration is what
+// actually reaches the cascade. Keep both in sync so component-level references
+// resolve to the same stack regardless of import order.
+$body-font-family: 'Inter', 'Lato', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+$font-weight-light: 300;
+$font-weight-regular: 400;
+$font-weight-bold: 600;
+
+
+
+
+$global-lineheight: 1.625;
+
+// Panels & UI
+$panel-bg: rgba(30, 30, 30, 0.85);
+$panel-radius: 12px;
+$panel-blur: 8px;
+
+
+
+
+//OLD FROM BEFORE
+
+$dark-pink: #4effd0;
+$yellow: #4effd0;
+$blue-turquoise: #3bb2d0;
+$charcoal-grey: #393f44;
+$dove-grey: #717171;
+$blue-grey: #9AA2A9;
+$light-grey: #cAccd0;
+$porcelain: #F4F6F7;
+$white: #ffffff;
+$black: #000;
+$sea-blue: #2C75B0;
+$color-12: #f0f1f2;
+$color-13: #d0021b;
+$color-14: #65b60d;
+
+$border-color-1: rgba(26, 28, 34, 0.1);
+$border-color-2: rgba(202, 204,208, 0.85); // For inputs
+
+// Typography
+$font-size-tiny: 10px;
+$font-size-extra-small: 12px;
+$font-size-small: 13px;
+$font-size-normal: 14px;
+$font-size-medium: 16px;
+$font-size-big: 21px;
+$font-size-extra-big: 18px;
+
+$font-size-h1: 64px;
+$font-size-h2: 42px;
+$font-size-h3: 26px;
+
+// Typography – weights
+$font-weight-light: 300;
+$font-weight-regular: 400;
+$font-weight-bold: 700;
+
+$body-font-family: 'Inter', 'Lato', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+$global-lineheight: 1.625;
+
+// Layout
+$margin-size-extra-small: 15px;
+$margin-size-small: 30px;
+$margin-size: 50px;
+$space-1: 8px;
+$space: 5px;
+
+
+// Header
+$header-main-height: 55px;
+$header-main-height-mobile: 50px;
+$header-secondary-height: 0;
+$header-bg-image: url("/static/images/components/layout/header-bg-texture.png");
+$header-gradient-color-1: rgba(#4effd0, 0.8);
+$header-gradient-color-2: rgba(#c90e39, 0.7);
+
+
+// Transitions – timings
+$animation-time: .16s;
+$animation-time-2: .24s;
+$animation-time-3: .5s;
+$animation-time-4: .75s;
+
+// Transitions – functions
+$ease-in-cubic: cubic-bezier(0.550, 0.055, 0.675, 0.190);
+$ease-out-cubic: cubic-bezier(0.215, 0.610, 0.355, 1.000);
+$ease-in-out-cubic: cubic-bezier(0.645, 0.045, 0.355, 1.000);
+
+$ease-in-sine: cubic-bezier(0.470, 0.000, 0.745, 0.715);
+$ease-out-sine: cubic-bezier(0.390, 0.575, 0.565, 1.000);
+$ease-in-out-sine: cubic-bezier(0.445, 0.050, 0.550, 0.950);

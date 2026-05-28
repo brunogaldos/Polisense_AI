@@ -1,0 +1,33 @@
+@import 'css/settings';
+
+// Wrapper to control scrollbar position
+.dataset-list-wrapper {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 190px);
+    overflow: hidden; // Hide the wrapper's scrollbar
+    padding-right: 0px; // Remove padding to push scrollbar right
+}
+
+.c-explore-dataset-list {
+    position: relative;
+    max-height: calc(100vh - 190px) !important; // Reduced by 10px to fit within glass panel
+    overflow-y: auto; // Enable scrolling for the list
+    padding-right: 0; // Remove any padding
+    margin-right: 0; // Remove any margin
+    width: 100%; // Normal width
+    .column {
+        padding: 0px;
+        margin-top: 2 * $space;
+
+        .dataset-placeholder {
+            min-width: 100%;
+            min-height: 130px;
+            background-color: $porcelain;
+        }
+    }
+
+    .spinner-box {
+        top: 50%;
+    }
+}

@@ -1,0 +1,109 @@
+@import 'css/settings';
+
+.c-explore-dataset-list-item {
+  display: flex;
+  flex-direction: row;
+  position: relative;
+  min-height: 130px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 1px 6px 0 rgba(0,0,0,.0);
+  box-sizing: border-box;
+  transition: all $animation-time-2 $ease-in-out-sine;
+  background: #44546a; // Solid primary color background
+
+  &:hover {
+    box-shadow: 0 0 0 2px #4effd0, 0 20px 30px rgba(68, 84, 106, 0.3);
+    -webkit-transform: translateY(-4px);
+    transform: translateY(-4px);
+    z-index: 99;
+  }
+
+  &.-active {
+    border: none;
+    box-shadow: 0 0 0 2px #4effd0, 0 1px 6px 0 rgba(68, 84, 106, 0.2);
+
+    &:hover {
+      box-shadow: 0 0 0 2px #4effd0, 0 20px 30px rgba(68, 84, 106, 0.3);
+    }
+  }
+
+    // Chart
+  .list-item-chart {
+    width: 130px;
+    height: 100%;
+    flex-shrink: 0;
+    border-radius: 4px 0px 0px 4px;
+    overflow: hidden;
+    background-color: $porcelain;
+    cursor: pointer;
+
+    .c-widget-chart {
+      min-height: 130px;
+      max-height: 130px;
+      height: 100%;
+      display: flex;
+      flex-grow: 1;
+    }
+
+    &.-expanded-chart {
+      width: 50%;
+    }
+  }
+
+  .info {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-width: 170px;
+    padding: 2 * $space 3 * $space 3 * $space 2 * $space;
+    background: #44546a; // Solid primary color background
+    border-radius: 0 4px 4px 0; // Match the card's border radius on the right side
+    color: #FFFFFF; // Default white text for all content
+
+    // Make all text elements white
+    h1, h2, h3, h4, h5, h6, p, span, div, a {
+      color: #FFFFFF !important; // Force white text for all elements
+      font-size: calc(1em - 0.5px); // Increase font size by 1.5px (was -2px, now -0.5px)
+    }
+
+    .source-date {
+      display: flex;
+      width: 100%;
+      justify-content: space-between;
+      margin-bottom: 5px;
+      font-size: calc(#{$font-size-tiny} - 0.5px); // Increase font size by 1.5px (was -2px, now -0.5px)
+      font-weight: bold;
+      line-height: 10px;
+      color: #4effd0 !important; // Turquoise color for smaller titles
+
+      .source {
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          overflow: hidden;
+          margin-right: 4 * $space;
+          max-width: 100px;
+          color: #4effd0 !important; // Turquoise color for smaller titles
+      }
+
+      .date {
+          color: #4effd0 !important; // Turquoise color for smaller titles
+      }
+    }
+
+    .title-actions {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      height: 100%;
+
+      a {
+        text-decoration: none;
+        color: #FFFFFF !important; // Force white text for links
+      }
+
+      h4 {
+        color: #FFFFFF !important; // Force white text for titles
+      }
+    }
+  }
+}

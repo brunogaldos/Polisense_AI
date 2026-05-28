@@ -1,0 +1,48 @@
+FROM python:3.11-slim
+
+# libgeos-dev is required by shapely (mcp-service dependency).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    libgeos-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build context must be the repo root:
+#   docker build -f backend/Dockerfile .
+# Or via docker-compose with context: ..
+WORKDIR /app
+
+# ── MCP geo service venv ──────────────────────────────────────────────────────
+# Cached independently so a code change doesn't rebuild this layer.
+COPY backend/mcp-service/requirements.txt ./mcp-service/requirements.txt
+RUN python3 -m venv ./mcp-service/venv && \
+    ./mcp-service/venv/bin/pip install --upgrade pip --quiet && \
+    ./mcp-service/venv/bin/pip install -r ./mcp-service/requirements.txt && \
+    echo "✅ MCP service venv ready"
+
+# ── Main app venv ─────────────────────────────────────────────────────────────
+COPY backend/requirements.txt ./requirements.txt
+RUN python3 -m venv .venv && \
+    .venv/bin/pip install --upgrade pip --quiet && \
+    .venv/bin/pip install -r requirements.txt && \
+    echo "✅ App venv ready"
+
+# ── App source ────────────────────────────────────────────────────────────────
+COPY backend/app/ ./app/
+COPY backend/data/ ./data/
+
+# Copy MCP service files (never copy venv/ from build context — it contains
+# platform-specific binaries built above in Docker).
+COPY backend/mcp-service/server.py  ./mcp-service/server.py
+COPY backend/mcp-service/tools/     ./mcp-service/tools/
+COPY backend/mcp-service/data/      ./mcp-service/data/
+
+# ── Credentials and start script ─────────────────────────────────────────────
+COPY backend/serviceAccountKey.json ./serviceAccountKey.json
+COPY backend/.env.production        ./.env.production
+COPY backend/start-prod.sh          ./start-prod.sh
+RUN chmod +x start-prod.sh
+
+EXPOSE 5029
+
+CMD ["./start-prod.sh"]

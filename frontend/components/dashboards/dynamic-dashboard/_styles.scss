@@ -1,0 +1,445 @@
+// Report Canvas Styles - Clean and Professional
+.c-report-canvas {
+  max-width: 1050px;
+  margin: 0 auto;
+  padding: 60px 20px;
+  background: white;
+  min-height: 100vh;
+  font-family: 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  line-height: 1.6;
+  color: #333;
+
+  &__header {
+    text-align: center;
+    margin-bottom: 40px;
+    padding-bottom: 20px;
+    border-bottom: 2px solid #e9ecef;
+
+    h1 {
+      font-size: 32px;
+      font-weight: 700;
+      color: #2c3e50;
+      margin: 0 0 10px 0;
+      letter-spacing: -0.5px;
+    }
+
+    &-meta {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      font-size: 14px;
+      color: #6c757d;
+      font-weight: 500;
+
+      span {
+        background: #f8f9fa;
+        padding: 6px 12px;
+        border-radius: 20px;
+        border: 1px solid #e9ecef;
+      }
+    }
+
+    &__gemini-badge {
+      background: linear-gradient(135deg, #4285f4, #34a853);
+      color: white !important;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      border: none !important;
+      box-shadow: 0 2px 4px rgba(66, 133, 244, 0.3);
+    }
+  }
+
+  &__content {
+    background: white;
+  }
+
+  &__text {
+    font-size: 16px;
+    line-height: 1.7;
+    color: #444;
+  }
+
+  &__gemini-content {
+    font-size: 16px;
+    line-height: 1.7;
+    color: #333333 !important;
+    
+    // Override global styles for headings inside report canvas
+    .gemini-report-h1,
+    .gemini-report-h2,
+    .gemini-report-h3,
+    .gemini-report-h4,
+    .gemini-report-h5,
+    .gemini-report-h6 {
+      color: inherit !important; // Inherit from inline style
+    }
+
+    // CRITICAL: Override global styles from _base.scss line 48 that set color: $dark-pink (#4effd0 - turquoise)
+    // Using ID selector for maximum specificity to override global h1-h4 styles
+    #gemini-report-canvas & h1,
+    #gemini-report-canvas & h2,
+    #gemini-report-canvas & h3,
+    #gemini-report-canvas & h4,
+    #gemini-report-canvas & h5,
+    #gemini-report-canvas & h6 {
+      color: #1a1a1a !important; // Dark gray/black - NO TURQUOISE
+      margin: 30px 0 15px 0 !important;
+      padding-bottom: 8px !important;
+      border-bottom: 2px solid #e0e0e0 !important;
+      font-weight: 700 !important;
+    }
+
+    #gemini-report-canvas & h1 { 
+      font-size: 32px !important; 
+      font-weight: 700 !important;
+      color: #000000 !important; // Pure black - NO TURQUOISE
+      border-bottom: 3px solid #d0d0d0 !important;
+      margin-top: 0 !important;
+    }
+    #gemini-report-canvas & h2 { 
+      font-size: 26px !important; 
+      font-weight: 700 !important;
+      color: #1a1a1a !important; // Dark gray - NO TURQUOISE
+    }
+    #gemini-report-canvas & h3 { 
+      font-size: 22px !important; 
+      font-weight: 600 !important;
+      color: #2c2c2c !important; // Dark gray - NO TURQUOISE
+    }
+    #gemini-report-canvas & h4 { 
+      font-size: 19px !important; 
+      font-weight: 600 !important;
+      color: #2c2c2c !important; // Dark gray - NO TURQUOISE
+    }
+    #gemini-report-canvas & h5 { 
+      font-size: 17px !important; 
+      font-weight: 600 !important;
+      color: #333333 !important;
+    }
+    #gemini-report-canvas & h6 { 
+      font-size: 15px !important; 
+      font-weight: 600 !important;
+      color: #333333 !important;
+    }
+
+    #gemini-report-canvas & p {
+      margin: 0 0 18px 0 !important;
+      text-align: left !important;
+      hyphens: auto !important;
+      line-height: 1.8 !important;
+      color: #333333 !important;
+    }
+
+    #gemini-report-canvas & ul,
+    #gemini-report-canvas & ol {
+      margin: 18px 0 !important;
+      padding-left: 35px !important;
+      color: #333333 !important;
+    }
+
+    #gemini-report-canvas & li {
+      margin: 10px 0 !important;
+      line-height: 1.7 !important;
+      color: #333333 !important;
+    }
+
+    #gemini-report-canvas & strong {
+      font-weight: 700 !important;
+      color: #000000 !important; // Black - NO TURQUOISE
+    }
+
+    #gemini-report-canvas & em {
+      font-style: italic !important;
+      color: #444444 !important;
+    }
+
+    // Enhanced visual elements
+    :global(table) {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    :global(th), :global(td) {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid #e9ecef;
+    }
+
+    :global(th) {
+      background: #f8f9fa;
+      font-weight: 600;
+      color: #2c3e50;
+    }
+
+    :global(tr:hover) {
+      background: #f8f9fa;
+    }
+    
+    :global(blockquote) {
+      border-left: 4px solid #666666; // Dark gray instead of turquoise
+      margin: 20px 0;
+      padding: 15px 20px;
+      background: #f5f5f5;
+      border-radius: 0 8px 8px 0;
+      font-style: italic;
+      color: #444444;
+    }
+    
+    :global(code) {
+      background: #f0f0f0;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+      font-size: 0.9em;
+      color: #c7254e; // Dark red for code
+      border: 1px solid #e0e0e0;
+    }
+    
+    :global(pre) {
+      background: #2d2d2d; // Dark gray background
+      color: #f8f8f8; // Light text
+      padding: 1rem;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 1rem 0;
+      border: 1px solid #444444;
+    }
+    
+    :global(pre code) {
+      background: none;
+      padding: 0;
+      color: inherit;
+      border: none;
+    }
+    
+    :global(a) {
+      color: #0066cc; // Professional blue, not turquoise
+      text-decoration: underline;
+      font-weight: 500;
+    }
+    
+    :global(a:hover) {
+      color: #0052a3; // Darker blue on hover
+      text-decoration: underline;
+    }
+
+    .highlight-box {
+      background: linear-gradient(135deg, #e3f2fd, #f3e5f5);
+      border-left: 4px solid #2196f3;
+      padding: 20px;
+      margin: 20px 0;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    .impact-matrix {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin: 20px 0;
+    }
+
+    .impact-item {
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid #e9ecef;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    }
+
+    .impact-item h4 {
+      margin: 0 0 8px 0;
+      color: #2c3e50;
+    }
+
+    .impact-item .score {
+      font-size: 24px;
+      font-weight: bold;
+      color: #27ae60;
+    }
+
+    .timeline {
+      position: relative;
+      padding-left: 30px;
+      margin: 20px 0;
+    }
+
+    .timeline::before {
+      content: '';
+      position: absolute;
+      left: 15px;
+      top: 0;
+      bottom: 0;
+      width: 2px;
+      background: #3498db;
+    }
+
+    .timeline-item {
+      position: relative;
+      margin-bottom: 20px;
+      padding-left: 20px;
+    }
+
+    .timeline-item::before {
+      content: '';
+      position: absolute;
+      left: -8px;
+      top: 5px;
+      width: 12px;
+      height: 12px;
+      background: #3498db;
+      border-radius: 50%;
+    }
+
+    .progress-bar {
+      width: 100%;
+      height: 8px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3498db, #2ecc71);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+    }
+
+    p {
+      margin: 0 0 16px 0;
+      text-align: justify;
+      hyphens: auto;
+    }
+
+    &-list-item {
+      margin: 8px 0;
+      padding-left: 20px;
+      position: relative;
+
+      &::before {
+        content: '•';
+        color: #3498db;
+        font-weight: bold;
+        position: absolute;
+        left: 0;
+      }
+    }
+  }
+
+  &__error {
+    text-align: center;
+    padding: 60px 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+
+    h3 {
+      color: #e74c3c;
+      margin: 0 0 15px 0;
+      font-size: 20px;
+    }
+
+    p {
+      color: #6c757d;
+      margin: 0;
+      font-size: 16px;
+    }
+  }
+
+  &__download-buttons {
+    text-align: center;
+    margin: 40px 0;
+    padding: 30px 20px;
+    background-color: #f8f9fa;
+    border-radius: 10px;
+    border: 1px solid #e9ecef;
+
+    h3 {
+      color: #2c3e50;
+      margin: 0 0 20px 0;
+      font-size: 20px;
+      font-weight: 600;
+    }
+
+    &__container {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+    }
+  }
+
+  &__download-button {
+    border: none;
+    padding: 12px 24px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 14px;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    color: white;
+    font-family: inherit;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    &:active {
+      transform: translateY(0);
+    }
+
+    &--print {
+      background: linear-gradient(135deg, #e74c3c, #c0392b);
+      
+      &:hover {
+        background: linear-gradient(135deg, #c0392b, #a93226);
+      }
+    }
+
+    &--word {
+      background: linear-gradient(135deg, #3498db, #2980b9);
+      
+      &:hover {
+        background: linear-gradient(135deg, #2980b9, #21618c);
+      }
+    }
+  }
+}
+
+// Responsive design
+@media (max-width: 768px) {
+  .c-report-canvas {
+    padding: 20px 15px;
+
+    &__header {
+      h1 {
+        font-size: 28px;
+      }
+
+      &-meta {
+        flex-direction: column;
+        gap: 10px;
+      }
+    }
+
+    &__text {
+      font-size: 15px;
+
+      h2 {
+        font-size: 20px;
+      }
+    }
+  }
+}

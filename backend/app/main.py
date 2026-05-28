@@ -1,0 +1,1032 @@
+"""Polisense API — FastAPI backend."""
+
+import asyncio
+import json
+import logging
+import os
+import random
+import re
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+from fastapi import FastAPI, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+
+from app.chatbot.skills_first_chat_bot import SkillsFirstChatBot
+from app.ingestion.json_converter import json_to_markdown, json_to_summary_lines
+from app.ingestion.openai_extraction_service import OpenAIExtractionService
+from app.services.firestore_memory_service import FirestoreMemoryService
+from app.services.openai_vector_store_service import OpenAIVectorStoreService
+from app.services.s3_storage_service import S3StorageService
+
+logging.basicConfig(
+    level=logging.WARNING,  # silence library noise
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%S",
+)
+logging.getLogger("polisense").setLevel(logging.INFO)
+logging.getLogger("uvicorn.access").setLevel(logging.WARNING)  # suppress HTTP access lines
+logger = logging.getLogger("polisense")
+
+# Same default base path as chatController.ts (API_BASE_PATH || "/api/policy_research").
+BASE_PATH = os.getenv("API_BASE_PATH", "/api/policy_research")
+
+
+def _load_data_layout() -> dict:
+    candidates = []
+    env_path = os.getenv("DATA_LAYOUT_PATH")
+    if env_path:
+        candidates.append(Path(env_path))
+    backend_py = Path(__file__).resolve().parents[1]
+    candidates.append(backend_py / "data" / "dataLayout.json")
+    for path in candidates:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            logger.info("Loaded dataLayout for RAG chatbot from %s", path)
+            return data
+        except Exception:  # noqa: BLE001
+            continue
+    logger.error("Failed to load dataLayout — using minimal fallback")
+    return {
+        "categories": [],
+        "aboutProject": "RAG chatbot for policy research",
+        "documentUrls": [],
+        "jsonUrls": [],
+    }
+
+
+DATA_LAYOUT = _load_data_layout()
+
+app = FastAPI(title="Polisense API (Python)")
+
+# Permissive CORS reflecting the request origin with credentials — matches the
+# Node app's behavior (allow all origins, allow credentials). allow_origin_regex
+# echoes the origin back, which is required when allow_credentials=True.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=".*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Content-Length"],
+)
+
+# WebSocket client registry — mirrors customApp.ts `wsClients` (clientId -> socket).
+# Stored on app.state so route handlers / future services can broadcast to a
+# specific wsClientId during a chat turn.
+ws_clients: dict[str, WebSocket] = {}
+app.state.ws_clients = ws_clients
+
+
+@app.get("/health")
+async def health() -> dict:
+    # Must answer instantly (Cloud Run liveness probe) — no async work here.
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.websocket("/ws")
+async def ws_endpoint(websocket: WebSocket) -> None:
+    await websocket.accept()
+    client_id = str(uuid.uuid4())
+    ws_clients[client_id] = websocket
+    # First frame is the client id — the frontend resolves its connect promise on this.
+    await websocket.send_json({"clientId": client_id})
+    logger.info("WS connected: %s (%d clients)", client_id, len(ws_clients))
+    try:
+        while True:
+            # Inbound frames are ignored — a chat turn is started via the PUT /
+            # HTTP call carrying wsClientId (same split as the Node server). We
+            # receive only to detect disconnects.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        ws_clients.pop(client_id, None)
+        logger.info("WS disconnected: %s (%d clients)", client_id, len(ws_clients))
+
+
+# ---------------------------------------------------------------------------
+# WebSocket broadcast — mirrors chatController.ts sendWsEvent: pushes
+# { sender: 'bot', type, data } to every connected client. The ingestion
+# pipeline uses it to report progress/completion to all open UIs.
+# ---------------------------------------------------------------------------
+
+
+async def broadcast_ws_event(event_type: str, data: dict) -> None:
+    message = {"sender": "bot", "type": event_type, "data": data}
+    sent = 0
+    for client_id, ws in list(ws_clients.items()):
+        try:
+            await ws.send_json(message)
+            sent += 1
+        except Exception as e:  # noqa: BLE001
+            logger.error("WS send error to %s: %s", client_id, e)
+    logger.info("WS '%s' -> %d/%d clients", event_type, sent, len(ws_clients))
+
+
+async def _safe_delete_artifacts(vs_id, vs_file_id, attachable_id) -> None:
+    """Fire-and-forget OpenAI Files + vector-store reference cleanup for one doc."""
+    try:
+        await asyncio.to_thread(
+            OpenAIVectorStoreService.delete_file_artifacts, vs_id, vs_file_id, attachable_id
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("OpenAI file cleanup failed: %s", e)
+
+
+async def _cleanup_conversation_artifacts(memory: dict, memory_id: str) -> None:
+    """Fire-and-forget cleanup when a whole conversation is deleted: detach every
+    uploaded file, then delete the vector store itself as a backstop."""
+    vs_id = memory.get("vectorStoreId")
+    for doc in memory.get("uploadedDocuments") or []:
+        await _safe_delete_artifacts(vs_id, doc.get("openaiFileId"), doc.get("attachableFileId"))
+    if vs_id:
+        try:
+            await asyncio.to_thread(OpenAIVectorStoreService.delete_vector_store, vs_id)
+            logger.info("Deleted vector store %s (conversation %s)", vs_id, memory_id)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Could not delete vector store %s: %s", vs_id, e)
+
+
+# ---------------------------------------------------------------------------
+# Ingestion (GeoJSON + JSON) — ports the fire-and-forget pipeline from
+# chatController.ts. The HTTP handler validates, returns 202 with a fileId, and
+# schedules the heavy work as an asyncio task that streams progress over WS.
+# Blocking SDK calls (S3, OpenAI) run in threads so the event loop stays free.
+# ---------------------------------------------------------------------------
+
+_B36 = "0123456789abcdefghijklmnopqrstuvwxyz"
+
+
+def _base36(n: int) -> str:
+    if n == 0:
+        return "0"
+    out = ""
+    while n > 0:
+        n, r = divmod(n, 36)
+        out = _B36[r] + out
+    return out
+
+
+def _make_file_id(file_name: str) -> tuple[str, int, str]:
+    """Return (fileId, timestamp_ms, sanitized_name) like the Node handlers:
+    `${Date.now()}_${rand.toString(36)}_${sanitized}`."""
+    timestamp = int(datetime.now(timezone.utc).timestamp() * 1000)
+    random_suffix = _base36(round(random.random() * 1e9))
+    sanitized = re.sub(r"[^a-zA-Z0-9.-]", "_", file_name)
+    return f"{timestamp}_{random_suffix}_{sanitized}", timestamp, sanitized
+
+
+def _flatten_coords(coords: Any) -> list:
+    if not isinstance(coords, list):
+        return []
+    if coords and isinstance(coords[0], (int, float)):
+        return [[coords[0], coords[1]]]
+    out: list = []
+    for c in coords:
+        out.extend(_flatten_coords(c))
+    return out
+
+
+def _compute_centroid(coords: Any):
+    pts = _flatten_coords(coords)
+    if not pts:
+        return None
+    lng = sum(p[0] for p in pts) / len(pts)
+    lat = sum(p[1] for p in pts) / len(pts)
+    return [lng, lat]
+
+
+async def _process_geojson_ingestion(
+    geojson: dict, file_name: str, memory_id: str | None, file_id: str, timestamp: int, sanitized: str
+) -> None:
+    feature_count = len(geojson.get("features") or [])
+    await broadcast_ws_event(
+        "extractionProgress", {"fileId": file_id, "phase": "extracting", "fileName": file_name}
+    )
+    try:
+        short_lines: list[str] = []
+        rich_blocks: list[str] = []
+        for idx, feature in enumerate(geojson.get("features") or []):
+            geometry = feature.get("geometry") or {}
+            geom_type = geometry.get("type") or "Unknown"
+            coords = geometry.get("coordinates")
+            centroid = _compute_centroid(coords) if coords is not None else None
+            location_str = ""
+            if centroid:
+                lng, lat = centroid
+                location_str = (
+                    f"{abs(lat):.5f}°{'N' if lat >= 0 else 'S'}, "
+                    f"{abs(lng):.5f}°{'E' if lng >= 0 else 'W'}"
+                )
+
+            props: list[str] = []
+            for k, v in (feature.get("properties") or {}).items():
+                if v is None or v == "":
+                    continue
+                sval = str(v)
+                props.append(f"{k}: {sval[:117] + '...' if len(sval) > 120 else sval}")
+
+            parts = [f"Feature {idx + 1}", f"type: {geom_type}"]
+            if location_str:
+                parts.append(f"location: {location_str}")
+            parts.extend(props)
+            short_lines.append(" | ".join(parts))
+
+            lines = [f"--- Feature {idx + 1} ({file_name}) ---", f"Geometry: {geom_type}"]
+            if location_str:
+                lines.append(f"Location (centroid): {location_str}")
+            if props:
+                lines.append("Properties:")
+                lines.extend(f"  {p}" for p in props)
+            rich_blocks.append("\n".join(lines))
+
+        # Upload original GeoJSON to S3 (for download) — non-fatal.
+        s3_result = None
+        geojson_bytes = json.dumps(geojson, ensure_ascii=False).encode("utf-8")
+        try:
+            s3_result = await asyncio.to_thread(
+                S3StorageService.upload_file,
+                geojson_bytes,
+                f"uploads/{timestamp}/{sanitized}",
+                "application/geo+json",
+            )
+            logger.info("GeoJSON S3 upload: s3://%s/%s", s3_result["bucket"], s3_result["key"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("GeoJSON S3 upload failed (non-fatal): %s", e)
+
+        if not memory_id:
+            logger.warning("No memoryId — skipping indexing")
+            return
+
+        await broadcast_ws_event("extractionProgress", {"fileId": file_id, "phase": "indexing"})
+
+        # Firestore: capped feature summaries for the geospatial handler (<200, ~30KB).
+        max_geo_context = 200
+        context_lines = short_lines[:max_geo_context]
+        if feature_count > max_geo_context:
+            logger.warning(
+                "Storing %d/%d feature summaries in Firestore for geo context",
+                max_geo_context,
+                feature_count,
+            )
+        await asyncio.to_thread(
+            FirestoreMemoryService.save_geojson_summaries, memory_id, file_id, file_name, context_lines
+        )
+
+        # Vector store: full rich-text representation for semantic search.
+        vector_store_id = await asyncio.to_thread(
+            OpenAIVectorStoreService.get_or_create_vector_store, memory_id
+        )
+        full_text = "\n".join(
+            [f"File: {file_name}", f"Total features: {feature_count}", "", "\n\n".join(rich_blocks)]
+        )
+        text_file_name = f"{re.sub(r'[.][^/.]+$', '', file_name)}_features.txt"
+        await asyncio.to_thread(
+            OpenAIVectorStoreService.upload_file_to_vector_store,
+            full_text.encode("utf-8"),
+            text_file_name,
+            vector_store_id,
+            "text/plain",
+        )
+
+        # Register doc for download tracking — non-fatal.
+        doc: dict[str, Any] = {
+            "id": file_id,
+            "name": file_name,
+            "size": len(geojson_bytes),
+            "type": "application/geo+json",
+            "uploadTime": datetime.now(timezone.utc),
+            "extractionStatus": "rag_ready",
+            "extractionMethod": "GEOJSON_VECTOR_STORE",
+        }
+        if s3_result:
+            doc["s3Bucket"] = s3_result["bucket"]
+            doc["s3Key"] = s3_result["key"]
+        try:
+            await asyncio.to_thread(FirestoreMemoryService.add_or_update_document, memory_id, doc)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Firestore doc save failed: %s", e)
+
+        await broadcast_ws_event(
+            "ragIngestionCompleted",
+            {
+                "fileId": file_id,
+                "documentName": file_name,
+                "s3Key": s3_result["key"] if s3_result else None,
+                "s3Bucket": s3_result["bucket"] if s3_result else None,
+                "message": f'✅ GeoJSON layer "{file_name}" indexed ({feature_count} features ready for queries)',
+                "featureCount": feature_count,
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("GeoJSON ingestion failed for %s", file_name)
+        await broadcast_ws_event(
+            "extractionFailed", {"fileId": file_id, "documentName": file_name, "error": str(e)}
+        )
+
+
+async def _process_json_ingestion(
+    data: Any, file_name: str, memory_id: str | None, file_id: str, timestamp: int, sanitized: str
+) -> None:
+    await broadcast_ws_event(
+        "extractionProgress", {"fileId": file_id, "phase": "extracting", "fileName": file_name}
+    )
+    try:
+        markdown = json_to_markdown(data, file_name)
+        await broadcast_ws_event("extractionCompleted", {"fileId": file_id, "phase": "extracted"})
+
+        s3_result = None
+        json_bytes = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        try:
+            s3_result = await asyncio.to_thread(
+                S3StorageService.upload_file,
+                json_bytes,
+                f"uploads/{timestamp}/{sanitized}",
+                "application/json",
+            )
+            logger.info("JSON S3 upload: s3://%s/%s", s3_result["bucket"], s3_result["key"])
+        except Exception as e:  # noqa: BLE001
+            logger.error("JSON S3 upload failed (non-fatal): %s", e)
+
+        if not memory_id:
+            logger.warning("No memoryId — skipping summary storage")
+            return
+
+        await broadcast_ws_event("extractionProgress", {"fileId": file_id, "phase": "indexing"})
+
+        summaries = json_to_summary_lines(data, file_name)
+        await asyncio.to_thread(
+            FirestoreMemoryService.save_geojson_summaries, memory_id, file_id, file_name, summaries
+        )
+
+        doc: dict[str, Any] = {
+            "id": file_id,
+            "name": file_name,
+            "size": len(json_bytes),
+            "type": "application/json",
+            "uploadTime": datetime.now(timezone.utc),
+            "extractionStatus": "rag_ready",
+            "extractionMethod": "JSON_SUMMARIES",
+        }
+        if s3_result:
+            doc["s3Bucket"] = s3_result["bucket"]
+            doc["s3Key"] = s3_result["key"]
+        try:
+            await asyncio.to_thread(FirestoreMemoryService.add_or_update_document, memory_id, doc)
+        except Exception as e:  # noqa: BLE001
+            logger.error("Firestore doc save failed: %s", e)
+
+        # Vector store upload is best-effort and must not block the completion event.
+        try:
+            vector_store_id = await asyncio.to_thread(
+                OpenAIVectorStoreService.get_or_create_vector_store, memory_id
+            )
+        except Exception:  # noqa: BLE001
+            vector_store_id = None
+        if vector_store_id:
+
+            async def _upload_md() -> None:
+                try:
+                    await asyncio.to_thread(
+                        OpenAIVectorStoreService.upload_file_to_vector_store,
+                        markdown.encode("utf-8"),
+                        f"{file_id}.md",
+                        vector_store_id,
+                    )
+                    logger.info("JSON indexed in vector store %s", vector_store_id)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Vector store upload failed (non-fatal): %s", e)
+
+            asyncio.create_task(_upload_md())
+
+        await broadcast_ws_event(
+            "ragIngestionCompleted",
+            {
+                "fileId": file_id,
+                "documentName": file_name,
+                "s3Key": s3_result["key"] if s3_result else None,
+                "s3Bucket": s3_result["bucket"] if s3_result else None,
+                "message": f'✅ "{file_name}" indexed ({len(summaries)} records ready for queries)',
+                "summaryCount": len(summaries),
+            },
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.exception("JSON ingestion failed for %s", file_name)
+        await broadcast_ws_event(
+            "extractionFailed", {"fileId": file_id, "documentName": file_name, "error": str(e)}
+        )
+
+
+_IMAGE_EXT_RE = re.compile(r"\.(png|jpe?g|gif|webp)$", re.IGNORECASE)
+_XLSX_EXT_RE = re.compile(r"\.(xlsx|xlsm|xltm|xltx)$", re.IGNORECASE)
+_LEGACY_XLS_RE = re.compile(r"\.(xls|xlsb)$", re.IGNORECASE)
+
+
+def _strip_ext_md(name: str) -> str:
+    """`foo.pdf` -> `foo.md` (mirrors the Node `.replace(/\\.[^/.]+$/, '') + '.md'`)."""
+    return re.sub(r"\.[^/.]+$", "", name) + ".md"
+
+
+def _process_pdf_ingestion_sync(
+    file_buffer: bytes, original_name: str, mime_type: str, vector_store_id: str
+) -> dict:
+    """Blocking core of PDF/image/spreadsheet ingestion (OpenAI + extraction).
+    Returns {openaiFileId, attachableFileId, ingestionMethod}. Runs in a thread."""
+    is_image = bool(re.match(r"^image/", mime_type or "", re.IGNORECASE)) or bool(
+        _IMAGE_EXT_RE.search(original_name)
+    )
+
+    if is_image:
+        logger.info("%r is an image — uploading original + OCR for text retrieval", original_name)
+        # 1. Upload the original image so the chatbot can attach it as input_file.
+        attachable_file_id: str | None = None
+        try:
+            attachable_file_id = OpenAIExtractionService.upload_for_attachment(
+                file_buffer, original_name, mime_type
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Original-image attachment upload failed (non-fatal): %s", e)
+        # 2. OCR the image and index the markdown for file_search.
+        extracted = OpenAIExtractionService.extract_from_file(file_buffer, original_name, mime_type)
+        md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
+        result = OpenAIVectorStoreService.upload_file_to_vector_store(
+            md, _strip_ext_md(original_name), vector_store_id, "text/markdown"
+        )
+        return {
+            "openaiFileId": result["openaiFileId"],
+            "attachableFileId": attachable_file_id,
+            "ingestionMethod": "ocr_fallback",
+        }
+
+    if _XLSX_EXT_RE.search(original_name):
+        # OOXML spreadsheets — extract locally to row-bounded Markdown, then
+        # index with a tighter static chunking strategy (deterministic, keeps a
+        # typical row+context in a single chunk).
+        logger.info("Extracting spreadsheet %r locally via openpyxl", original_name)
+        extracted = OpenAIExtractionService.extract_from_spreadsheet(file_buffer, original_name)
+        md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
+        result = OpenAIVectorStoreService.upload_file_to_vector_store(
+            md,
+            _strip_ext_md(original_name),
+            vector_store_id,
+            "text/markdown",
+            4,
+            {"type": "static", "static": {"max_chunk_size_tokens": 600, "chunk_overlap_tokens": 150}},
+        )
+        # Spreadsheets can't be sent as input_file for visual reads.
+        return {
+            "openaiFileId": result["openaiFileId"],
+            "attachableFileId": None,
+            "ingestionMethod": "spreadsheet",
+        }
+
+    if _LEGACY_XLS_RE.search(original_name):
+        ext = _LEGACY_XLS_RE.search(original_name).group(0)
+        raise ValueError(
+            f"{ext} files are not supported. Please save the workbook as .xlsx "
+            f"(or .xlsm) and re-upload."
+        )
+
+    # Default path: try a direct vector-store upload of the original bytes.
+    logger.info("Uploading %r (%d bytes) to vector store %s", original_name, len(file_buffer), vector_store_id)
+    try:
+        result = OpenAIVectorStoreService.upload_file_to_vector_store(
+            file_buffer, original_name, vector_store_id, mime_type
+        )
+        # Text-rich PDF happy path: the vector store holds the original bytes, so
+        # the same id is attachable for visual reads.
+        return {
+            "openaiFileId": result["openaiFileId"],
+            "attachableFileId": result["openaiFileId"],
+            "ingestionMethod": "direct",
+        }
+    except Exception as vs_err:  # noqa: BLE001
+        msg = str(vs_err)
+        is_parse_failure = bool(re.search(r"could not be parsed|file processing failed", msg, re.IGNORECASE))
+        is_pdf = mime_type == "application/pdf" or bool(re.search(r"\.pdf$", original_name, re.IGNORECASE))
+        if not is_parse_failure or not is_pdf:
+            raise
+
+        logger.warning("Vector store could not parse %r — falling back to GPT-4o Vision OCR", original_name)
+        extracted = OpenAIExtractionService.extract_from_file(file_buffer, original_name, mime_type)
+        # Scanned-PDF case: extract_from_file kept the original PDF alive in the
+        # Files API so we can attach it later.
+        attachable_file_id = extracted.get("visionUploadedFileId")
+        md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
+        result = OpenAIVectorStoreService.upload_file_to_vector_store(
+            md, _strip_ext_md(original_name), vector_store_id, "text/markdown"
+        )
+        return {
+            "openaiFileId": result["openaiFileId"],
+            "attachableFileId": attachable_file_id,
+            "ingestionMethod": "ocr_fallback",
+        }
+
+
+async def _process_pdf_ingestion(
+    file_buffer: bytes,
+    original_name: str,
+    mime_type: str,
+    memory_id: str | None,
+    file_id: str,
+    timestamp: int,
+    sanitized: str,
+) -> None:
+    """Background PDF/image/spreadsheet ingestion — S3 upload, vector-store
+    indexing (with OCR / spreadsheet fallbacks), Firestore status, WS events."""
+    try:
+        # 1. Register doc so it's findable for download.
+        if memory_id:
+            try:
+                await asyncio.to_thread(
+                    FirestoreMemoryService.add_or_update_document,
+                    memory_id,
+                    {
+                        "id": file_id,
+                        "name": original_name,
+                        "size": len(file_buffer),
+                        "type": mime_type,
+                        "uploadTime": datetime.now(timezone.utc),
+                        "extractionStatus": "extracting",
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Firestore doc registration failed: %s", e)
+
+        # 2. Upload to S3 for download-later (non-fatal).
+        s3_result = None
+        try:
+            s3_result = await asyncio.to_thread(
+                S3StorageService.upload_file, file_buffer, f"uploads/{timestamp}/{sanitized}", mime_type
+            )
+            logger.info("S3 upload: s3://%s/%s", s3_result["bucket"], s3_result["key"])
+            if memory_id:
+                try:
+                    await asyncio.to_thread(
+                        FirestoreMemoryService.update_document_status,
+                        memory_id,
+                        file_id,
+                        "extracting",
+                        {
+                            "documentName": original_name,
+                            "s3Bucket": s3_result["bucket"],
+                            "s3Key": s3_result["key"],
+                        },
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("S3 ref update failed: %s", e)
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "S3 upload failed (bucket=%s, region=%s): %s",
+                os.getenv("AWS_S3_BUCKET"),
+                os.getenv("AWS_REGION"),
+                e,
+            )
+
+        # 3. Index in the vector store (skipped without a memoryId).
+        if not memory_id:
+            logger.warning("No memoryId — skipping vector store upload for %s", original_name)
+            await broadcast_ws_event(
+                "ragIngestionCompleted",
+                {
+                    "fileId": file_id,
+                    "documentName": original_name,
+                    "s3Key": s3_result["key"] if s3_result else None,
+                    "s3Bucket": s3_result["bucket"] if s3_result else None,
+                    "message": f'✅ "{original_name}" ready',
+                },
+            )
+            return
+
+        vector_store_id = await asyncio.to_thread(
+            OpenAIVectorStoreService.get_or_create_vector_store, memory_id
+        )
+        indexed = await asyncio.to_thread(
+            _process_pdf_ingestion_sync, file_buffer, original_name, mime_type, vector_store_id
+        )
+
+        # 4. Mark ready in Firestore + notify frontend.
+        method = {
+            "spreadsheet": "EXCELJS_MARKDOWN",
+            "ocr_fallback": "OPENAI_VISION_OCR",
+        }.get(indexed["ingestionMethod"], "OPENAI_VECTOR_STORE")
+        try:
+            await asyncio.to_thread(
+                FirestoreMemoryService.update_document_status,
+                memory_id,
+                file_id,
+                "rag_ready",
+                {
+                    "documentName": original_name,
+                    "openaiFileId": indexed["openaiFileId"],
+                    "vectorStoreId": vector_store_id,
+                    "attachableFileId": indexed["attachableFileId"],
+                    "extractionMethod": method,
+                },
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Final status update failed: %s", e)
+
+        await broadcast_ws_event(
+            "ragIngestionCompleted",
+            {
+                "fileId": file_id,
+                "documentName": original_name,
+                "s3Key": s3_result["key"] if s3_result else None,
+                "s3Bucket": s3_result["bucket"] if s3_result else None,
+                "message": f'✅ "{original_name}" indexed and ready for queries',
+            },
+        )
+    except Exception as err:  # noqa: BLE001
+        err_msg = str(err)
+        logger.exception("PDF ingestion failed for %s", original_name)
+        if memory_id:
+            try:
+                await asyncio.to_thread(
+                    FirestoreMemoryService.update_document_status,
+                    memory_id,
+                    file_id,
+                    "failed",
+                    {"documentName": original_name, "extractionError": err_msg},
+                )
+            except Exception:  # noqa: BLE001
+                pass
+        await broadcast_ws_event(
+            "extractionFailed", {"fileId": file_id, "documentName": original_name, "error": err_msg}
+        )
+
+
+def _openai_file_content(file_id: str) -> bytes:
+    """Download a file's bytes from the OpenAI Files API (download fallback)."""
+    from openai import OpenAI
+
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("AI_MODEL_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY not set")
+    return OpenAI(api_key=api_key).files.content(file_id).read()
+
+
+# ---------------------------------------------------------------------------
+# Read-only routes (Firestore-backed). More specific paths are declared BEFORE
+# the catch-all GET /{memory_id} so they take precedence.
+# ---------------------------------------------------------------------------
+
+
+@app.get(BASE_PATH + "/conversations")
+async def get_user_conversations(userId: str | None = None):
+    if not userId:
+        return JSONResponse({"error": "userId is required"}, status_code=400)
+    conversations = FirestoreMemoryService.get_user_conversations(userId)
+    return {"conversations": conversations}
+
+
+@app.get(BASE_PATH + "/conversations/{memory_id}/documents")
+async def get_conversation_documents(memory_id: str):
+    documents = FirestoreMemoryService.get_conversation_documents(memory_id)
+    return {"documents": documents}
+
+
+def _parse_upload_time(value: Any) -> datetime:
+    """Mirror `document.uploadTime ? new Date(uploadTime) : new Date()` — accept
+    epoch ms, ISO string, or nothing. A datetime is stored as a Firestore Timestamp."""
+    if value is None:
+        return datetime.now(timezone.utc)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return datetime.now(timezone.utc)
+    return datetime.now(timezone.utc)
+
+
+@app.post(BASE_PATH + "/conversations/{memory_id}/documents")
+async def add_document(memory_id: str, body: dict):
+    document = body.get("document")
+    user_id = body.get("userId")
+    if not document or not document.get("id") or not document.get("name"):
+        return JSONResponse({"error": "document with id and name is required"}, status_code=400)
+    doc_to_save = {
+        **document,
+        "uploadTime": _parse_upload_time(document.get("uploadTime")),
+        "extractionStatus": document.get("extractionStatus") or "pending",
+    }
+    try:
+        FirestoreMemoryService.add_or_update_document(memory_id, doc_to_save, user_id)
+        return {"success": True, "document": {**doc_to_save, "uploadTime": doc_to_save["uploadTime"].isoformat()}}
+    except Exception:  # noqa: BLE001
+        logger.exception("Error adding document to %s", memory_id)
+        return JSONResponse({"error": "Failed to add document"}, status_code=500)
+
+
+@app.put(BASE_PATH + "/conversations/{memory_id}/documents/{document_id}")
+async def update_document_status(memory_id: str, document_id: str, body: dict):
+    status = body.get("status")
+    if not status:
+        return JSONResponse({"error": "status is required"}, status_code=400)
+    additional = {
+        "extractionMethod": body.get("extractionMethod"),
+        "markdownFileName": body.get("markdownFileName"),
+        "extractionError": body.get("extractionError"),
+        "extractedMetadata": body.get("extractedMetadata"),
+        "documentName": body.get("documentName"),
+    }
+    try:
+        FirestoreMemoryService.update_document_status(memory_id, document_id, status, additional)
+        return {"success": True}
+    except Exception:  # noqa: BLE001
+        logger.exception("Error updating document status %s/%s", memory_id, document_id)
+        return JSONResponse({"error": "Failed to update document status"}, status_code=500)
+
+
+@app.delete(BASE_PATH + "/conversations/{memory_id}/documents/{document_id}")
+async def remove_document(memory_id: str, document_id: str):
+    try:
+        removed = FirestoreMemoryService.remove_document(memory_id, document_id)
+        # Fire-and-forget OpenAI Files + vector-store cleanup of the removed doc's
+        # artifacts. Failures are logged, never propagated — Firestore is updated.
+        if removed:
+            asyncio.create_task(
+                _safe_delete_artifacts(
+                    removed.get("vectorStoreId"),
+                    removed.get("openaiFileId"),
+                    removed.get("attachableFileId"),
+                )
+            )
+        return {"success": True}
+    except Exception:  # noqa: BLE001
+        logger.exception("Error removing document %s/%s", memory_id, document_id)
+        return JSONResponse({"error": "Failed to remove document"}, status_code=500)
+
+
+@app.delete(BASE_PATH + "/conversations/{memory_id}")
+async def delete_conversation(memory_id: str, userId: str | None = None):
+    try:
+        memory = FirestoreMemoryService.load_memory(memory_id)
+        # Ownership check — reject if the conversation belongs to another user.
+        if userId and memory and memory.get("userId") and memory.get("userId") != userId:
+            return JSONResponse(
+                {"error": "Unauthorized: Conversation does not belong to user"}, status_code=403
+            )
+        FirestoreMemoryService.delete_memory(memory_id)
+        # Fire-and-forget cleanup of the conversation's OpenAI vector store + every
+        # uploaded file's artifacts. Loaded BEFORE deletion so we know what to clean.
+        if memory:
+            asyncio.create_task(_cleanup_conversation_artifacts(memory, memory_id))
+        return {"success": True}
+    except Exception:  # noqa: BLE001
+        logger.exception("Error deleting conversation %s", memory_id)
+        return Response(status_code=500)
+
+
+@app.post(BASE_PATH + "/conversations/{memory_id}/metadata")
+async def update_conversation_metadata(memory_id: str, body: dict):
+    try:
+        FirestoreMemoryService.update_conversation_metadata(
+            memory_id,
+            {
+                "conversationTitle": body.get("conversationTitle"),
+                "conversationSummary": body.get("conversationSummary"),
+            },
+        )
+        return {"success": True}
+    except Exception:  # noqa: BLE001
+        logger.exception("Error updating metadata for %s", memory_id)
+        return Response(status_code=500)
+
+
+# ---------------------------------------------------------------------------
+# Ingestion + download routes.
+# ---------------------------------------------------------------------------
+
+
+@app.post(BASE_PATH + "/ingest-geojson")
+async def ingest_geojson(body: dict):
+    geojson_content = body.get("geojsonContent")
+    file_name = body.get("fileName")
+    memory_id = body.get("memoryId")
+    if geojson_content in (None, "") or not file_name:
+        return JSONResponse({"error": "geojsonContent and fileName are required"}, status_code=400)
+    try:
+        geojson = json.loads(geojson_content) if isinstance(geojson_content, str) else geojson_content
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid GeoJSON content"}, status_code=400)
+    if (
+        not isinstance(geojson, dict)
+        or geojson.get("type") != "FeatureCollection"
+        or not isinstance(geojson.get("features"), list)
+    ):
+        return JSONResponse({"error": "Content must be a GeoJSON FeatureCollection"}, status_code=400)
+
+    feature_count = len(geojson["features"])
+    file_id, timestamp, sanitized = _make_file_id(file_name)
+    asyncio.create_task(
+        _process_geojson_ingestion(geojson, file_name, memory_id, file_id, timestamp, sanitized)
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "fileId": file_id,
+            "featureCount": feature_count,
+            "message": f"GeoJSON received ({feature_count} features). RAG ingestion started.",
+            "status": "processing",
+        },
+        status_code=202,
+    )
+
+
+@app.post(BASE_PATH + "/ingest-json")
+async def ingest_json(body: dict):
+    json_content = body.get("jsonContent")
+    file_name = body.get("fileName")
+    memory_id = body.get("memoryId")
+    if json_content in (None, "") or not file_name:
+        return JSONResponse({"error": "jsonContent and fileName are required"}, status_code=400)
+    try:
+        data = json.loads(json_content) if isinstance(json_content, str) else json_content
+    except (ValueError, TypeError):
+        return JSONResponse({"error": "Invalid JSON content"}, status_code=400)
+
+    if isinstance(data, list):
+        record_count, unit = len(data), "records"
+    elif isinstance(data, dict):
+        record_count, unit = len(data), "keys"
+    else:
+        record_count, unit = 1, "keys"
+
+    file_id, timestamp, sanitized = _make_file_id(file_name)
+    asyncio.create_task(
+        _process_json_ingestion(data, file_name, memory_id, file_id, timestamp, sanitized)
+    )
+    return JSONResponse(
+        {
+            "success": True,
+            "fileId": file_id,
+            "recordCount": record_count,
+            "message": f"JSON received ({record_count} {unit}). Ingestion started.",
+            "status": "processing",
+        },
+        status_code=202,
+    )
+
+
+@app.post(BASE_PATH + "/ingest-pdf")
+async def ingest_pdf(
+    file: UploadFile = File(...),
+    memoryId: str | None = Form(default=None),
+    userId: str | None = Form(default=None),
+):
+    """Multipart upload — mirrors the Node multer single('file') handler. Reads
+    the file, returns 202 with a fileId, and runs extraction in the background."""
+    file_buffer = await file.read()
+    if not file_buffer:
+        return JSONResponse({"error": "No file provided"}, status_code=400)
+
+    original_name = file.filename or "upload"
+    mime_type = file.content_type or "application/octet-stream"
+    file_id, timestamp, sanitized = _make_file_id(original_name)
+
+    asyncio.create_task(
+        _process_pdf_ingestion(
+            file_buffer, original_name, mime_type, memoryId, file_id, timestamp, sanitized
+        )
+    )
+    return JSONResponse({"success": True, "fileId": file_id, "status": "processing"}, status_code=202)
+
+
+@app.get(BASE_PATH + "/conversations/{memory_id}/documents/{document_id}/download")
+async def download_document(memory_id: str, document_id: str, name: str | None = None):
+    try:
+        documents = await asyncio.to_thread(
+            FirestoreMemoryService.get_conversation_documents, memory_id
+        )
+        # Search order: exact id, then name==documentId (id/name drift), then ?name= hint.
+        doc = (
+            next((d for d in documents if d.get("id") == document_id), None)
+            or next((d for d in documents if d.get("name") == document_id), None)
+            or (next((d for d in documents if d.get("name") == name), None) if name else None)
+        )
+        if not doc:
+            logger.warning(
+                "Download: document not found. memoryId=%s documentId=%s name=%s",
+                memory_id,
+                document_id,
+                name,
+            )
+            return JSONResponse(
+                {
+                    "error": "Document not found. It may have been uploaded before download support "
+                    "was added — please re-upload to enable downloads."
+                },
+                status_code=404,
+            )
+
+        if doc.get("s3Bucket") and doc.get("s3Key"):
+            file_bytes = await asyncio.to_thread(
+                S3StorageService.download_file, doc["s3Bucket"], doc["s3Key"]
+            )
+        elif doc.get("openaiFileId"):
+            logger.info(
+                "Download: S3 refs missing for %s, falling back to OpenAI Files API (fileId=%s)",
+                doc.get("id"),
+                doc["openaiFileId"],
+            )
+            try:
+                file_bytes = await asyncio.to_thread(_openai_file_content, doc["openaiFileId"])
+            except Exception:  # noqa: BLE001
+                logger.exception("Download: OpenAI Files API fallback failed")
+                return JSONResponse(
+                    {"error": "File storage is temporarily unavailable. Please try again later."},
+                    status_code=503,
+                )
+        else:
+            logger.warning(
+                "Download: document found (%s) but missing both S3 refs and OpenAI file ID",
+                doc.get("id"),
+            )
+            return JSONResponse(
+                {
+                    "error": "File is not yet available for download. It may still be processing — "
+                    "please try again in a moment."
+                },
+                status_code=404,
+            )
+
+        s3_key = doc.get("s3Key") or ""
+        file_name = doc.get("name") or (s3_key.split("/")[-1] if s3_key else None) or "download"
+        return Response(
+            content=file_bytes,
+            media_type=doc.get("type") or "application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{quote(file_name)}"'},
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("Error downloading document from S3")
+        return JSONResponse({"error": "Failed to download document"}, status_code=500)
+
+
+@app.put(BASE_PATH + "/")
+async def skills_first_chat(body: dict):
+    """The chat turn — port of chatController.ts skillsFirstChat. Loads memory to
+    return the existing chatLog (so the UI can hydrate), then runs the bot as a
+    detached task that streams the answer over the wsClientId WebSocket. Mirrors
+    the Node split: HTTP responds immediately; output goes over WS."""
+    chat_log = body.get("chatLog")
+    ws_client_id = body.get("wsClientId")
+    memory_id = body.get("memoryId")
+    silent_mode = bool(body.get("silentMode"))
+    user_id = body.get("userId")
+
+    _last_entry = (chat_log or [{}])[-1]
+    _last_sender = _last_entry.get("sender", "?")
+    _last_msg = (_last_entry.get("message") or "")[:200].replace("\n", " ")
+    logger.info(
+        "CHAT REQUEST — user=%s memory=%s ws=%s log_len=%d | [%s] %s",
+        user_id or "anon",
+        memory_id or "new",
+        ws_client_id or "none",
+        len(chat_log or []),
+        _last_sender,
+        _last_msg,
+    )
+
+    save_chat_log = None
+    try:
+        bot = SkillsFirstChatBot(ws_client_id, ws_clients, memory_id, user_id)
+        bot.silent_mode = silent_mode
+
+        if memory_id:
+            memory = await asyncio.to_thread(FirestoreMemoryService.load_memory, memory_id)
+            if memory:
+                save_chat_log = memory.get("chatLog")
+                bot.memory = bot._ensure_stages(memory)  # reuse the load we just did
+
+        asyncio.create_task(bot.skills_first_conversation(chat_log, DATA_LAYOUT))
+    except Exception:  # noqa: BLE001
+        logger.exception("skillsFirstChat init failed")
+        return Response(status_code=500)
+
+    logger.info("ChatController for %s initialized chatLog len=%s", ws_client_id, len(chat_log or []))
+    if save_chat_log is not None:
+        return JSONResponse(save_chat_log)
+    return Response(status_code=200)
+
+
+@app.get(BASE_PATH + "/{memory_id}")
+async def get_chat_log(memory_id: str):
+    memory = FirestoreMemoryService.load_memory(memory_id)
+    if memory is None:
+        return Response(status_code=404)
+    payload: dict = {
+        "chatLog": memory.get("chatLog", []),
+        "totalCosts": FirestoreMemoryService.full_cost_of_memory(memory),
+    }
+    uploaded = memory.get("uploadedDocuments")
+    if uploaded:
+        payload["uploadedDocuments"] = uploaded
+    return payload
