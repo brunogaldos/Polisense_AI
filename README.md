@@ -8,10 +8,17 @@ AI copilot for government resource planning. RAG-powered platform for processing
 |---|---|
 | Frontend | Next.js 13, React, Mapbox GL |
 | Backend | Python 3.11, FastAPI, uvicorn |
-| AI | OpenAI Responses API (gpt-4o), file_search, code_interpreter, web_search |
+| AI (cloud, default) | OpenAI Responses API (gpt-4o), file_search, code_interpreter, web_search |
+| AI (local, optional) | Weaviate + sentence-transformers (MiniLM) + BGE reranker + Docling; generation via OpenRouter |
 | Memory | Firebase Firestore |
 | File storage | AWS S3 |
 | Geo service | Python FastMCP (stdio subprocess) |
+
+The backend can run RAG **entirely on a local stack** (Weaviate vector DB +
+local embeddings/reranking + Docling parsing) instead of OpenAI's hosted
+`file_search`, selected per-capability by environment flags. Everything defaults
+to the OpenAI behaviour above; see [Local AI stack](#local-ai-stack-optional)
+and `backend/README.md` for details.
 
 ## Architecture
 
@@ -66,6 +73,15 @@ Polisense/
 │   │   ├── ingestion/
 │   │   │   ├── openai_extraction_service.py
 │   │   │   └── json_converter.py
+│   │   ├── rag/                         # Local AI stack (optional, flag-gated)
+│   │   │   ├── embedder.py              # sentence-transformers (MiniLM, CPU)
+│   │   │   ├── reranker.py              # BGE cross-encoder
+│   │   │   ├── chunking.py              # structure-aware chunking
+│   │   │   ├── ocr.py                   # Docling PDF parsing
+│   │   │   ├── ingest_document.py       # dual-write helper (PDF/markdown → Weaviate)
+│   │   │   ├── shadow.py                # observe-only shadow retrieval
+│   │   │   ├── providers/               # LLMProvider: OpenAI + OpenRouter + factory
+│   │   │   └── store/                   # Weaviate ingest / retrieve / schema / verify
 │   │   ├── services/
 │   │   │   ├── firestore_memory_service.py
 │   │   │   ├── openai_vector_store_service.py
@@ -156,6 +172,11 @@ docker-compose up --build
 |---|---|
 | Frontend | http://localhost:3000 |
 | Backend | http://localhost:5029 |
+| Weaviate | http://localhost:8090 (local AI stack; only used when the RAG flags are on) |
+
+> The `weaviate` service starts with the stack but is inert until you enable the
+> local RAG flags (see [Local AI stack](#local-ai-stack-optional)). The backend
+> reaches it at `weaviate:8080` on the compose network.
 
 **How URLs are wired:**
 
@@ -209,6 +230,55 @@ The server-side `RESEARCH_API_URL` (used by the Next.js proxy) should be set as 
 
 ---
 
+## Local AI stack (optional)
+
+The backend can serve RAG from a **local stack** instead of OpenAI's hosted
+tools, to reduce OpenAI dependency. It is a drop-in behind environment flags —
+**every flag defaults to the original OpenAI behaviour**, so an unconfigured
+deploy is unchanged.
+
+What it replaces:
+
+| Capability | Cloud (default) | Local |
+|---|---|---|
+| Embeddings + vector store | OpenAI vector store | Weaviate + sentence-transformers (MiniLM, CPU) |
+| Retrieval | OpenAI hosted `file_search` | Weaviate hybrid (BM25 + vector) + BGE reranker |
+| PDF parsing | OpenAI vision OCR | Docling (layout-aware) |
+| Generation | OpenAI Responses API (gpt-4o) | OpenRouter (OpenAI-compatible) |
+| Router (intent) | OpenAI gpt-4o-mini | OpenAI **or** OpenRouter |
+
+### Flags (all default to OpenAI)
+
+| Variable | Values | Effect |
+|---|---|---|
+| `AI_PROVIDER` | `openai` (default) / `local` | Which provider classifies intent (router) |
+| `RAG_DUAL_WRITE` | off (default) / `1` | Also chunk+embed uploads into Weaviate at ingest time |
+| `RAG_SHADOW` | off (default) / `1` | Run local retrieval alongside the OpenAI answer and log a comparison (observe-only) |
+| `RAG_RETRIEVAL` | `openai` (default) / `local` | Replace hosted `file_search` with injected local Weaviate context (generation stays on the Responses API) |
+| `RAG_GENERATION` | `openai` (default) / `local` | Route generation to OpenRouter (no hosted tools, local context only) |
+
+### Rollout order (each step is reversible by flag)
+
+1. `RAG_DUAL_WRITE=1` — populate Weaviate in parallel; reads still go to OpenAI.
+2. `RAG_SHADOW=1` — compare local vs. OpenAI retrieval offline.
+3. `RAG_RETRIEVAL=local` — answers grounded in local retrieval; generation still OpenAI.
+4. `RAG_GENERATION=local` — generation via OpenRouter; the turn makes **no OpenAI calls**.
+
+### Notes / current limitations
+
+- In **local generation** mode there is no `code_interpreter` / `web_search`, and
+  image / file attachments are not sent to the model (text + retrieved context only).
+- Docling runs with OCR disabled, so **scanned / image-only PDFs** yield little local
+  text (a local vision model is future work). Text PDFs work well.
+- Embeddings are model-specific: changing `BGE_MODEL_NAME` requires re-ingesting.
+- First run downloads the embedding (~90 MB) and reranker (~600 MB) models, plus
+  Docling weights.
+
+See `backend/README.md` → **Local RAG stack** for the model/Weaviate env vars and
+the per-conversation scoping model.
+
+---
+
 ## Environment variables
 
 ### Backend (`backend/.env`)
@@ -225,6 +295,10 @@ The server-side `RESEARCH_API_URL` (used by the Next.js proxy) should be set as 
 | `PORT` | No | Default `5029` |
 | `MULTIMODAL_MODEL` | No | Default `gpt-4o` |
 | `ROUTER_MODEL` | No | Default `gpt-4o-mini` |
+| `AI_PROVIDER` / `RAG_*` | No | Local AI stack flags — see [Local AI stack](#local-ai-stack-optional) |
+| `OPENROUTER_API_KEY` | No | Required only when generation/router runs locally (`*_local`) |
+| `WEAVIATE_HOST` / `WEAVIATE_PORT` | No | Weaviate location (default `localhost:8090`; `weaviate:8080` in Docker) |
+| `BGE_MODEL_NAME` / `RERANKER_MODEL_NAME` / `LLM_MODEL` | No | Local embedding / reranker / OpenRouter model overrides |
 
 ### Frontend (Next.js proxy, server-side)
 

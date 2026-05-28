@@ -4,6 +4,10 @@ FastAPI backend for the Polisense policy-research platform. Provides the REST AP
 WebSocket chat channel, document ingestion pipeline, and geospatial tools consumed
 by the Next.js frontend.
 
+RAG can run on OpenAI's hosted stack (default) **or** on a fully local stack
+(Weaviate + local embeddings/reranking + Docling, generation via OpenRouter),
+selected per-capability by environment flags. See [Local RAG stack](#local-rag-stack).
+
 ---
 
 ## Table of Contents
@@ -18,8 +22,9 @@ by the Next.js frontend.
 8. [WebSocket Protocol](#websocket-protocol)
 9. [Chat Flow](#chat-flow)
 10. [Document Ingestion Pipeline](#document-ingestion-pipeline)
-11. [Geospatial (MCP) Service](#geospatial-mcp-service)
-12. [Docker](#docker)
+11. [Local RAG stack](#local-rag-stack)
+12. [Geospatial (MCP) Service](#geospatial-mcp-service)
+13. [Docker](#docker)
 
 ---
 
@@ -111,6 +116,25 @@ backend/
 │   ├── ingestion/
 │   │   ├── openai_extraction_service.py  PDF / image / spreadsheet → text
 │   │   └── json_converter.py          GeoJSON / JSON → Markdown for the vector store
+│   ├── rag/                           Local AI stack (optional, flag-gated)
+│   │   ├── config.py                  Weaviate + model env config
+│   │   ├── embedder.py                sentence-transformers (MiniLM, CPU)
+│   │   ├── reranker.py                BGE cross-encoder reranker
+│   │   ├── chunking.py                Structure-aware chunk splitting
+│   │   ├── ocr.py                     Docling layout-aware PDF parsing
+│   │   ├── ingest_document.py         Dual-write: PDF/markdown → chunks → Weaviate
+│   │   ├── shadow.py                  Observe-only shadow retrieval (logs JSONL)
+│   │   ├── providers/                 LLMProvider abstraction
+│   │   │   ├── base.py                OpenAI-compatible base (classify_json, stream_chat)
+│   │   │   ├── openai_provider.py     OpenAI (default)
+│   │   │   ├── openrouter_provider.py OpenRouter (local generation/router)
+│   │   │   └── factory.py             get_provider / get_generation_provider
+│   │   └── store/                     Weaviate
+│   │       ├── config.py              Client factory
+│   │       ├── schema.py              Chunk schema (incl. memoryId/documentId)
+│   │       ├── ingest.py              ingest_chunks / delete_by_memory
+│   │       ├── retrieve.py            bm25 / vector / hybrid + memoryId filter
+│   │       └── verify.py              Inspect collection contents
 │   └── chatbot/
 │       ├── base_chat_bot.py           Async port of PsBaseChatBot (WS helpers,
 │       │                              Firestore memory, cost accounting)
@@ -155,6 +179,14 @@ backend/
 | Firebase project | `sturdy-quarter-479808-p0` |
 | OpenAI account | API key with Files + Responses API access |
 | AWS S3 bucket | for document storage |
+| Weaviate | only for the local RAG stack — `docker compose up -d weaviate` |
+| OpenRouter account | only for local generation/router (`*_local`) |
+
+> `requirements.txt` includes the local-stack deps (`weaviate-client`,
+> `sentence-transformers`, `torch`, `docling`, `PyMuPDF`). These are heavy
+> (~GB image size) and download embedding/reranker/Docling weights on first use.
+> They are imported lazily — if you never enable the RAG flags, they are not
+> loaded at runtime.
 
 ---
 
