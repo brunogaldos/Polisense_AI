@@ -83,19 +83,7 @@ COPY tsconfig.json .
 
 RUN yarn install --immutable
 
-# Create or update .env.production with NEXT_PUBLIC_* variables from build args
-# This ensures Next.js can read them during build (NEXT_PUBLIC_* vars must be available at build time)
-# Note: ENV vars set from ARGs are available during RUN commands, so we use them directly
-RUN touch .env.production && \
-    if [ -n "$NEXT_PUBLIC_RESEARCH_WS_URL" ]; then \
-      echo "NEXT_PUBLIC_RESEARCH_WS_URL=$NEXT_PUBLIC_RESEARCH_WS_URL" >> .env.development; \
-    fi && \
-    if [ -n "$NEXT_PUBLIC_RESEARCH_API_URL" ]; then \
-      echo "NEXT_PUBLIC_RESEARCH_API_URL=$NEXT_PUBLIC_RESEARCH_API_URL" >> .env.development; \
-    fi && \
-    if [ -n "$NEXT_PUBLIC_AUTH_CALLBACK" ]; then \
-      echo "NEXT_PUBLIC_AUTH_CALLBACK=$NEXT_PUBLIC_AUTH_CALLBACK" >> .env.development; \
-    fi
+COPY .env.development .env.local
 
 RUN yarn build
 
