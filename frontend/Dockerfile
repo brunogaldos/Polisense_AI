@@ -58,7 +58,6 @@ COPY modules ./modules
 COPY pages ./pages
 COPY public ./public
 COPY redactions ./redactions
-COPY selectors ./selectors
 COPY services ./services
 COPY server ./server
 COPY utils ./utils
