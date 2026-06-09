@@ -773,7 +773,7 @@ GROUNDING:
             system_prompt = (
                 "You are a geospatial assistant for Polisense. "
                 "Detect the language of the user's message and respond in that same language. "
-                "You have five tools:\n"
+                "You have geospatial tools:\n"
                 "  • place_pins        — use when the user wants to see LOCATIONS as pins/markers "
                 "(warehouses, offices, customer sites, addresses, points of interest). "
                 "Extract lat/lon or addresses from the context below and pass them to the tool.\n"
@@ -786,6 +786,11 @@ GROUNDING:
                 "  • create_buffer     — use when the user asks to 'draw a circle', 'create a buffer', "
                 "'show the area within X km', or 'highlight a radius' around a point. "
                 "Requires a center lat/lon and a radius in km.\n"
+                "  - generate_mine_ndvi_geojson - use when the user asks for NDVI, VCI, vegetation stress, "
+                "Sentinel-2 anomaly, vegetation health, or mine-environment analysis around a mine. "
+                "Requires WGS84 lon/lat plus year and month; use this file-writing version for normal map display.\n"
+                "  - generate_mine_ndvi_geojson_inline - same NDVI analysis, but returns GeoJSON layers inline. "
+                "Use only for small buffers or coarse outputs.\n"
                 "  • run_deep_analysis — use when the user says 'make a deep analysis on', 'run a full analysis', "
                 "'show detailed analysis', 'generate the analysis report', or any similar request for a "
                 "comprehensive data-driven study. Pass the city/topic as the `topic` argument "
@@ -1079,6 +1084,85 @@ GROUNDING:
             if not self.silent_mode:
                 await self._stream_aggregated_response(brief)
 
+        elif tool_name in ("generate_mine_ndvi_geojson", "generate_mine_ndvi_geojson_inline"):
+            layer_order = [
+                "mine_point",
+                "buffer",
+                "severe_extreme",
+                "stress_class",
+                "vci",
+                "anomaly",
+            ]
+            layer_titles = {
+                "mine_point": "Mine point",
+                "buffer": "NDVI analysis buffer",
+                "anomaly": "NDVI anomaly",
+                "vci": "Vegetation Condition Index",
+                "stress_class": "Vegetation stress class",
+                "severe_extreme": "Severe/extreme vegetation stress",
+            }
+
+            raw_layers = tool_result.get("layers") or {}
+            geojson_layers: dict[str, Any] = {}
+            if tool_name == "generate_mine_ndvi_geojson":
+                for layer_name, path in raw_layers.items():
+                    try:
+                        geojson_layers[layer_name] = json.loads(Path(path).read_text(encoding="utf-8"))
+                    except Exception as fs_err:  # noqa: BLE001
+                        logger.warning("[geo] Could not read NDVI GeoJSON file %s: %s", path, fs_err)
+            else:
+                geojson_layers = {
+                    name: geojson
+                    for name, geojson in raw_layers.items()
+                    if isinstance(geojson, dict)
+                }
+
+            ordered_names = [name for name in layer_order if name in geojson_layers]
+            ordered_names.extend(name for name in geojson_layers.keys() if name not in ordered_names)
+
+            sent_count = 0
+            total_features = 0
+            for layer_name in ordered_names:
+                geojson = geojson_layers.get(layer_name)
+                features = geojson.get("features") if isinstance(geojson, dict) else None
+                if not features:
+                    continue
+                sent_count += 1
+                total_features += len(features)
+                render_type = "pins" if layer_name == "mine_point" else "polygons"
+                await self._send_bot_data(
+                    "map_concessions",
+                    {
+                        "geojson": geojson,
+                        "buffer": None,
+                        "place": layer_titles.get(layer_name, layer_name),
+                        "radiusKm": tool_result.get("buffer_km") or tool_args.get("buffer_km"),
+                        "count": len(features),
+                        "renderType": render_type,
+                        "pinColor": "black",
+                    },
+                )
+
+            mine_name = tool_result.get("mine_name") or tool_args.get("mine_name") or "mine"
+            month = tool_result.get("month") or tool_args.get("month")
+            year = tool_result.get("year") or tool_args.get("year")
+            feature_counts = tool_result.get("feature_counts") or {}
+            count_lines = [
+                f"- {layer_titles.get(name, name)}: {feature_counts[name]}"
+                for name in ordered_names
+                if name in feature_counts
+            ]
+            if sent_count:
+                brief = (
+                    f"Generated NDVI vegetation-stress layers for **{mine_name}** "
+                    f"({month}/{year}) and added **{sent_count}** layer(s) to the map.\n\n"
+                    + ("\n".join(count_lines) if count_lines else f"Total features rendered: {total_features}")
+                )
+            else:
+                brief = "The NDVI analysis completed, but no renderable GeoJSON features were produced."
+            if not self.silent_mode:
+                await self._stream_aggregated_response(brief)
+
         elif tool_name == "run_deep_analysis":
             panels = tool_result.get("panels")
             if not isinstance(panels, list) or not panels:
@@ -1313,6 +1397,16 @@ GROUNDING:
         if not self.openai_client:
             logger.error("OpenAI client not initialized (check OPENAI_API_KEY)")
             await self.send_agent_start("Error: OpenAI client not configured")
+            return
+
+        ndvi_analysis = re.compile(
+            r"\b(ndvi|vci|sentinel-?2|vegetation\s+(stress|health|condition)|mine\s+vegetation|"
+            r"vegetation\s+anomal(?:y|ies)|stress\s+class)\b",
+            re.IGNORECASE,
+        )
+        if ndvi_analysis.search(user_last_message):
+            logger.info("NDVI analysis mode - connecting to Geodata MCP Server")
+            await self.handle_geospatial_query(user_last_message)
             return
 
         # DEEP ANALYSIS — bypasses the router (run_deep_analysis MCP tool).
