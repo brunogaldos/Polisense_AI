@@ -36,7 +36,6 @@ from tools.mine_ndvi import (
     DEFAULT_BASELINE_START,
     DEFAULT_EE_PROJECT,
     generate_mine_ndvi_geojson as _generate_mine_ndvi_geojson,
-    generate_mine_ndvi_geojson_inline as _generate_mine_ndvi_geojson_inline,
 )
 from tools.polygon_from_document import polygon_from_utm_vertices, _utm_to_latlon
 
@@ -470,19 +469,19 @@ def generate_mine_ndvi_geojson(
         max_features: Maximum polygons per output layer.
     """
     try:
-        return  generate_mine_ndvi_geojson(
-        lon=lon,
-        lat=lat,
-        year=year,
-        month=month,
-        mine_name=mine_name,
-        buffer_km=buffer_km,
-        baseline_start=baseline_start,
-        baseline_end=baseline_end,
-        scale=scale,
-        min_patch_ha=min_patch_ha,
-        max_features=max_features,
-    )
+        return _generate_mine_ndvi_geojson(
+            lon=lon,
+            lat=lat,
+            year=year,
+            month=month,
+            mine_name=mine_name,
+            buffer_km=buffer_km,
+            baseline_start=baseline_start,
+            baseline_end=baseline_end,
+            scale=scale,
+            min_patch_ha=min_patch_ha,
+            max_features=max_features,
+        )
     except Exception as exc:
         return {"ok": False, "error": f"NDVI GeoJSON generation failed: {exc}"}
 
