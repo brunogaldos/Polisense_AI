@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 try:
@@ -5,8 +6,11 @@ try:
 except ImportError: 
     ee = None
 import os
+import json
+from dotenv import load_dotenv
 
-DEFAULT_EE_PROJECT = os.getenv("DEFAULT_EE_PROJECT_NAME")
+load_dotenv("backend\env_ee")
+
 S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S2_SCALE = 10000.0
 MAX_CLOUD_PCT = 60
@@ -41,17 +45,24 @@ VCI_CLASS_LABELS = {
 }
 
 
-def initialize_earth_engine(project=DEFAULT_EE_PROJECT):
+def initialize_earth_engine():
+    project = os.getenv("EE_PROJECT")
+    service_account = os.getenv("EE_SERVICE_ACCOUNT")
+    key_json = os.getenv("EE_KEY_JSON")
+    key_data = json.loads(key_json)
+    credentials = ee.ServiceAccountCredentials(
+    service_account,
+    key_data=json.dumps(key_data)
+    )
+    
+
     if ee is None:
         raise RuntimeError(
             "earthengine-api is not installed in the MCP service environment. "
             "Install backend/mcp-service/requirements.txt before using NDVI tools."
         )
-    try:
-        ee.Initialize(project=project)
-    except Exception:
-        ee.Authenticate()
-        ee.Initialize(project=project)
+    else:
+        ee.Initialize(credentials=credentials, project=project)
 
 
 def make_mine_region(lon, lat, buffer_km):
@@ -347,7 +358,6 @@ def generate_mine_ndvi_geojson(
     scale: int = 30,
     min_patch_ha: float = 5.0,
     max_features: int = 1000,
-    ee_project: str = DEFAULT_EE_PROJECT,
 ) -> dict:
     """
     Generate Mapbox-ready GeoJSON layers for mine-area vegetation stress.
@@ -364,7 +374,7 @@ def generate_mine_ndvi_geojson(
       severe_extreme
     """
 
-    initialize_earth_engine(ee_project)
+    initialize_earth_engine()
 
     layers = build_geojson_layers(
         lon=lon,
