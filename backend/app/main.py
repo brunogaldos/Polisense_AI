@@ -20,7 +20,7 @@ from app.chatbot.skills_first_chat_bot import SkillsFirstChatBot
 from app.ingestion.json_converter import json_to_markdown, json_to_summary_lines
 from app.ingestion.openai_extraction_service import OpenAIExtractionService
 from app.services.firestore_memory_service import FirestoreMemoryService
-from app.services.openai_vector_store_service import OpenAIVectorStoreService
+from app.services.vertex_rag_service import VertexRagService
 from app.services.s3_storage_service import S3StorageService
 
 logging.basicConfig(
@@ -128,28 +128,28 @@ async def broadcast_ws_event(event_type: str, data: dict) -> None:
     logger.info("WS '%s' -> %d/%d clients", event_type, sent, len(ws_clients))
 
 
-async def _safe_delete_artifacts(vs_id, vs_file_id, attachable_id) -> None:
-    """Fire-and-forget OpenAI Files + vector-store reference cleanup for one doc."""
+async def _safe_delete_artifacts(corpus_name: Any, rag_file_id: Any) -> None:
+    """Fire-and-forget Vertex AI RAG file cleanup for one document."""
     try:
         await asyncio.to_thread(
-            OpenAIVectorStoreService.delete_file_artifacts, vs_id, vs_file_id, attachable_id
+            VertexRagService.delete_file_artifacts, corpus_name, rag_file_id
         )
     except Exception as e:  # noqa: BLE001
-        logger.warning("OpenAI file cleanup failed: %s", e)
+        logger.warning("Vertex AI RAG file cleanup failed: %s", e)
 
 
 async def _cleanup_conversation_artifacts(memory: dict, memory_id: str) -> None:
-    """Fire-and-forget cleanup when a whole conversation is deleted: detach every
-    uploaded file, then delete the vector store itself as a backstop."""
-    vs_id = memory.get("vectorStoreId")
+    """Fire-and-forget cleanup when a whole conversation is deleted: delete every
+    per-document RAG file, then delete the corpus itself as a backstop."""
+    corpus_name = memory.get("ragCorpusName")
     for doc in memory.get("uploadedDocuments") or []:
-        await _safe_delete_artifacts(vs_id, doc.get("openaiFileId"), doc.get("attachableFileId"))
-    if vs_id:
+        await _safe_delete_artifacts(corpus_name, doc.get("ragFileId"))
+    if corpus_name:
         try:
-            await asyncio.to_thread(OpenAIVectorStoreService.delete_vector_store, vs_id)
-            logger.info("Deleted vector store %s (conversation %s)", vs_id, memory_id)
+            await asyncio.to_thread(VertexRagService.delete_corpus, corpus_name)
+            logger.info("Deleted RAG corpus %s (conversation %s)", corpus_name, memory_id)
         except Exception as e:  # noqa: BLE001
-            logger.warning("Could not delete vector store %s: %s", vs_id, e)
+            logger.warning("Could not delete RAG corpus %s: %s", corpus_name, e)
 
     # Best-effort: drop the conversation's chunks from the local Weaviate store
     # too. Gated by RAG_DUAL_WRITE so it's a no-op (no heavy import) when the
@@ -336,19 +336,19 @@ async def _process_geojson_ingestion(
             FirestoreMemoryService.save_geojson_summaries, memory_id, file_id, file_name, context_lines
         )
 
-        # Vector store: full rich-text representation for semantic search.
-        vector_store_id = await asyncio.to_thread(
-            OpenAIVectorStoreService.get_or_create_vector_store, memory_id
+        # Vertex AI RAG: full rich-text representation for semantic search.
+        corpus_name = await asyncio.to_thread(
+            VertexRagService.get_or_create_corpus, memory_id
         )
         full_text = "\n".join(
             [f"File: {file_name}", f"Total features: {feature_count}", "", "\n\n".join(rich_blocks)]
         )
         text_file_name = f"{re.sub(r'[.][^/.]+$', '', file_name)}_features.txt"
-        await asyncio.to_thread(
-            OpenAIVectorStoreService.upload_file_to_vector_store,
+        rag_result = await asyncio.to_thread(
+            VertexRagService.upload_file_to_corpus,
             full_text.encode("utf-8"),
             text_file_name,
-            vector_store_id,
+            corpus_name,
             "text/plain",
         )
 
@@ -363,7 +363,9 @@ async def _process_geojson_ingestion(
             "type": "application/geo+json",
             "uploadTime": datetime.now(timezone.utc),
             "extractionStatus": "rag_ready",
-            "extractionMethod": "GEOJSON_VECTOR_STORE",
+            "extractionMethod": "GEOJSON_VERTEX_RAG",
+            "ragCorpusName": corpus_name,
+            "ragFileId": rag_result.get("ragFileId"),
         }
         if s3_result:
             doc["s3Bucket"] = s3_result["bucket"]
@@ -442,28 +444,23 @@ async def _process_json_ingestion(
         except Exception as e:  # noqa: BLE001
             logger.error("Firestore doc save failed: %s", e)
 
-        # Vector store upload is best-effort and must not block the completion event.
-        try:
-            vector_store_id = await asyncio.to_thread(
-                OpenAIVectorStoreService.get_or_create_vector_store, memory_id
-            )
-        except Exception:  # noqa: BLE001
-            vector_store_id = None
-        if vector_store_id:
+        # Upload to Vertex AI RAG corpus (best-effort, fire-and-forget).
+        async def _upload_md() -> None:
+            try:
+                _corpus_name = await asyncio.to_thread(
+                    VertexRagService.get_or_create_corpus, memory_id
+                )
+                result = await asyncio.to_thread(
+                    VertexRagService.upload_file_to_corpus,
+                    markdown.encode("utf-8"),
+                    f"{file_id}.md",
+                    _corpus_name,
+                )
+                logger.info("JSON indexed in Vertex AI RAG corpus %s (file=%s)", _corpus_name, result["ragFileId"])
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Vertex AI RAG upload failed (non-fatal): %s", e)
 
-            async def _upload_md() -> None:
-                try:
-                    await asyncio.to_thread(
-                        OpenAIVectorStoreService.upload_file_to_vector_store,
-                        markdown.encode("utf-8"),
-                        f"{file_id}.md",
-                        vector_store_id,
-                    )
-                    logger.info("JSON indexed in vector store %s", vector_store_id)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Vector store upload failed (non-fatal): %s", e)
-
-            asyncio.create_task(_upload_md())
+        asyncio.create_task(_upload_md())
 
         # Dual-write the converted Markdown into the local store (best-effort, gated).
         _schedule_dual_write_markdown(markdown, file_name, memory_id, file_id)
@@ -497,57 +494,40 @@ def _strip_ext_md(name: str) -> str:
 
 
 def _process_pdf_ingestion_sync(
-    file_buffer: bytes, original_name: str, mime_type: str, vector_store_id: str
+    file_buffer: bytes, original_name: str, mime_type: str, corpus_name: str
 ) -> dict:
-    """Blocking core of PDF/image/spreadsheet ingestion (OpenAI + extraction).
-    Returns {openaiFileId, attachableFileId, ingestionMethod}. Runs in a thread."""
+    """Blocking core of PDF/image/spreadsheet ingestion (Vertex AI RAG).
+    Returns {ragFileId, ingestionMethod}. Runs in a thread."""
     is_image = bool(re.match(r"^image/", mime_type or "", re.IGNORECASE)) or bool(
         _IMAGE_EXT_RE.search(original_name)
     )
 
     if is_image:
-        logger.info("%r is an image — uploading original + OCR for text retrieval", original_name)
-        # 1. Upload the original image so the chatbot can attach it as input_file.
-        attachable_file_id: str | None = None
+        # Extract text via Gemini Vision, then index the markdown in the RAG corpus.
+        logger.info("%r is an image — extracting text via Gemini Vision", original_name)
         try:
-            attachable_file_id = OpenAIExtractionService.upload_for_attachment(
-                file_buffer, original_name, mime_type
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.warning("Original-image attachment upload failed (non-fatal): %s", e)
-        # 2. OCR the image and index the markdown for file_search.
-        extracted = OpenAIExtractionService.extract_from_file(file_buffer, original_name, mime_type)
-        md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
-        result = OpenAIVectorStoreService.upload_file_to_vector_store(
-            md, _strip_ext_md(original_name), vector_store_id, "text/markdown"
-        )
-        return {
-            "openaiFileId": result["openaiFileId"],
-            "attachableFileId": attachable_file_id,
-            "ingestionMethod": "ocr_fallback",
-        }
+            from app.ingestion.gemini_extraction_service import GeminiExtractionService
+            extracted = GeminiExtractionService.extract_from_image(file_buffer, original_name, mime_type)
+            md = (extracted.get("markdown") or "").encode("utf-8")
+            if md.strip():
+                result = VertexRagService.upload_file_to_corpus(
+                    md, _strip_ext_md(original_name), corpus_name, "text/markdown"
+                )
+                return {"ragFileId": result["ragFileId"], "ingestionMethod": "gemini_vision"}
+        except Exception as _img_err:  # noqa: BLE001
+            logger.warning("Gemini Vision extraction failed for %r: %s — S3 only", original_name, _img_err)
+        return {"ragFileId": None, "ingestionMethod": "image_s3_only"}
 
     if _XLSX_EXT_RE.search(original_name):
         # OOXML spreadsheets — extract locally to row-bounded Markdown, then
-        # index with a tighter static chunking strategy (deterministic, keeps a
-        # typical row+context in a single chunk).
+        # index in the RAG corpus.
         logger.info("Extracting spreadsheet %r locally via openpyxl", original_name)
         extracted = OpenAIExtractionService.extract_from_spreadsheet(file_buffer, original_name)
         md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
-        result = OpenAIVectorStoreService.upload_file_to_vector_store(
-            md,
-            _strip_ext_md(original_name),
-            vector_store_id,
-            "text/markdown",
-            4,
-            {"type": "static", "static": {"max_chunk_size_tokens": 600, "chunk_overlap_tokens": 150}},
+        result = VertexRagService.upload_file_to_corpus(
+            md, _strip_ext_md(original_name), corpus_name, "text/markdown"
         )
-        # Spreadsheets can't be sent as input_file for visual reads.
-        return {
-            "openaiFileId": result["openaiFileId"],
-            "attachableFileId": None,
-            "ingestionMethod": "spreadsheet",
-        }
+        return {"ragFileId": result["ragFileId"], "ingestionMethod": "spreadsheet"}
 
     if _LEGACY_XLS_RE.search(original_name):
         ext = _LEGACY_XLS_RE.search(original_name).group(0)
@@ -556,40 +536,10 @@ def _process_pdf_ingestion_sync(
             f"(or .xlsm) and re-upload."
         )
 
-    # Default path: try a direct vector-store upload of the original bytes.
-    logger.info("Uploading %r (%d bytes) to vector store %s", original_name, len(file_buffer), vector_store_id)
-    try:
-        result = OpenAIVectorStoreService.upload_file_to_vector_store(
-            file_buffer, original_name, vector_store_id, mime_type
-        )
-        # Text-rich PDF happy path: the vector store holds the original bytes, so
-        # the same id is attachable for visual reads.
-        return {
-            "openaiFileId": result["openaiFileId"],
-            "attachableFileId": result["openaiFileId"],
-            "ingestionMethod": "direct",
-        }
-    except Exception as vs_err:  # noqa: BLE001
-        msg = str(vs_err)
-        is_parse_failure = bool(re.search(r"could not be parsed|file processing failed", msg, re.IGNORECASE))
-        is_pdf = mime_type == "application/pdf" or bool(re.search(r"\.pdf$", original_name, re.IGNORECASE))
-        if not is_parse_failure or not is_pdf:
-            raise
-
-        logger.warning("Vector store could not parse %r — falling back to GPT-4o Vision OCR", original_name)
-        extracted = OpenAIExtractionService.extract_from_file(file_buffer, original_name, mime_type)
-        # Scanned-PDF case: extract_from_file kept the original PDF alive in the
-        # Files API so we can attach it later.
-        attachable_file_id = extracted.get("visionUploadedFileId")
-        md = (extracted.get("markdown") or extracted.get("text") or "").encode("utf-8")
-        result = OpenAIVectorStoreService.upload_file_to_vector_store(
-            md, _strip_ext_md(original_name), vector_store_id, "text/markdown"
-        )
-        return {
-            "openaiFileId": result["openaiFileId"],
-            "attachableFileId": attachable_file_id,
-            "ingestionMethod": "ocr_fallback",
-        }
+    # Default: upload original bytes directly to Vertex AI RAG (supports PDF, text, etc.).
+    logger.info("Uploading %r (%d bytes) to Vertex AI RAG corpus %s", original_name, len(file_buffer), corpus_name)
+    result = VertexRagService.upload_file_to_corpus(file_buffer, original_name, corpus_name, mime_type)
+    return {"ragFileId": result["ragFileId"], "ingestionMethod": "direct"}
 
 
 async def _process_pdf_ingestion(
@@ -667,18 +617,19 @@ async def _process_pdf_ingestion(
             )
             return
 
-        vector_store_id = await asyncio.to_thread(
-            OpenAIVectorStoreService.get_or_create_vector_store, memory_id
+        corpus_name = await asyncio.to_thread(
+            VertexRagService.get_or_create_corpus, memory_id
         )
         indexed = await asyncio.to_thread(
-            _process_pdf_ingestion_sync, file_buffer, original_name, mime_type, vector_store_id
+            _process_pdf_ingestion_sync, file_buffer, original_name, mime_type, corpus_name
         )
 
         # 4. Mark ready in Firestore + notify frontend.
         method = {
             "spreadsheet": "EXCELJS_MARKDOWN",
-            "ocr_fallback": "OPENAI_VISION_OCR",
-        }.get(indexed["ingestionMethod"], "OPENAI_VECTOR_STORE")
+            "gemini_vision": "GEMINI_VISION_OCR",
+            "image_s3_only": "S3_ONLY",
+        }.get(indexed["ingestionMethod"], "VERTEX_AI_RAG")
         try:
             await asyncio.to_thread(
                 FirestoreMemoryService.update_document_status,
@@ -687,9 +638,8 @@ async def _process_pdf_ingestion(
                 "rag_ready",
                 {
                     "documentName": original_name,
-                    "openaiFileId": indexed["openaiFileId"],
-                    "vectorStoreId": vector_store_id,
-                    "attachableFileId": indexed["attachableFileId"],
+                    "ragFileId": indexed["ragFileId"],
+                    "ragCorpusName": corpus_name,
                     "extractionMethod": method,
                 },
             )
@@ -726,16 +676,6 @@ async def _process_pdf_ingestion(
         await broadcast_ws_event(
             "extractionFailed", {"fileId": file_id, "documentName": original_name, "error": err_msg}
         )
-
-
-def _openai_file_content(file_id: str) -> bytes:
-    """Download a file's bytes from the OpenAI Files API (download fallback)."""
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("AI_MODEL_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY not set")
-    return OpenAI(api_key=api_key).files.content(file_id).read()
 
 
 # ---------------------------------------------------------------------------
@@ -821,9 +761,8 @@ async def remove_document(memory_id: str, document_id: str):
         if removed:
             asyncio.create_task(
                 _safe_delete_artifacts(
-                    removed.get("vectorStoreId"),
-                    removed.get("openaiFileId"),
-                    removed.get("attachableFileId"),
+                    removed.get("ragCorpusName"),
+                    removed.get("ragFileId"),
                 )
             )
         return {"success": True}
@@ -998,23 +937,9 @@ async def download_document(memory_id: str, document_id: str, name: str | None =
             file_bytes = await asyncio.to_thread(
                 S3StorageService.download_file, doc["s3Bucket"], doc["s3Key"]
             )
-        elif doc.get("openaiFileId"):
-            logger.info(
-                "Download: S3 refs missing for %s, falling back to OpenAI Files API (fileId=%s)",
-                doc.get("id"),
-                doc["openaiFileId"],
-            )
-            try:
-                file_bytes = await asyncio.to_thread(_openai_file_content, doc["openaiFileId"])
-            except Exception:  # noqa: BLE001
-                logger.exception("Download: OpenAI Files API fallback failed")
-                return JSONResponse(
-                    {"error": "File storage is temporarily unavailable. Please try again later."},
-                    status_code=503,
-                )
         else:
             logger.warning(
-                "Download: document found (%s) but missing both S3 refs and OpenAI file ID",
+                "Download: document found (%s) but S3 refs missing",
                 doc.get("id"),
             )
             return JSONResponse(

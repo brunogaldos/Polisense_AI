@@ -98,7 +98,7 @@ class FirestoreMemoryService:
             "stages": data.get("stages") or {},
             "totalCost": data.get("totalCost") or 0,
             "currentStage": data.get("currentStage"),
-            "vectorStoreId": data.get("vectorStoreId"),
+            "ragCorpusName": data.get("ragCorpusName"),
         }
         if data.get("userId") is not None:
             memory["userId"] = data["userId"]
@@ -128,7 +128,7 @@ class FirestoreMemoryService:
 
         The chat turn only mutates `chatLog` (and cost stages); uploadedDocuments,
         when present, come straight from a prior load() so their storage refs
-        (s3Key/openaiFileId/vectorStoreId/...) are already intact — we write them
+        (s3Key/ragFileId/ragCorpusName/...) are already intact — we write them
         back as-is under a merge so a concurrent ingest isn't clobbered. Uses
         set(merge=True); None fields are dropped so they never null out a stored
         value (mirrors removeUndefinedValues)."""
@@ -174,7 +174,6 @@ class FirestoreMemoryService:
                 "messageCount": len(stored_log),
                 "lastUserMessage": last_user_message,
                 "conversationTitle": conversation_title,
-                "vectorStoreId": memory.get("vectorStoreId"),
                 "userId": user_id if user_id is not None else memory.get("userId"),
                 "updatedAt": firestore.SERVER_TIMESTAMP,
             }
@@ -260,14 +259,14 @@ class FirestoreMemoryService:
             return []
 
     @staticmethod
-    def get_vector_store_id(memory_id: str) -> Optional[str]:
+    def get_rag_corpus_name(memory_id: str) -> Optional[str]:
         try:
             snap = db.collection(COLLECTION_NAME).document(memory_id).get()
             if not snap.exists:
                 return None
-            return (snap.to_dict() or {}).get("vectorStoreId")
+            return (snap.to_dict() or {}).get("ragCorpusName")
         except Exception:  # noqa: BLE001
-            logger.exception("Error getting vectorStoreId for %s", memory_id)
+            logger.exception("Error getting ragCorpusName for %s", memory_id)
             return None
 
     @staticmethod
@@ -351,7 +350,7 @@ class FirestoreMemoryService:
                         doc["extractedMetadata"] = existing.get("extractedMetadata")
                     if existing.get("markdownFileName") is not None:
                         doc["markdownFileName"] = existing.get("markdownFileName")
-                for field in ("s3Bucket", "s3Key", "openaiFileId", "vectorStoreId", "attachableFileId"):
+                for field in ("s3Bucket", "s3Key", "ragFileId", "ragCorpusName"):
                     if not doc.get(field) and existing.get(field):
                         doc[field] = existing[field]
                 existing_docs[idx] = doc

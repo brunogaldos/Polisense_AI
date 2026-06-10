@@ -58,10 +58,9 @@ class PsBaseChatBot:
         self.max_tokens = 4000
         self.llm_model = "gpt-4o-mini"
 
-        from openai import AsyncOpenAI
-
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("AI_MODEL_API_KEY")
-        self.openai_client = AsyncOpenAI(api_key=api_key) if api_key else None
+        from app.rag.providers.factory import get_provider
+        # AsyncOpenAI client pointed at Vertex AI — reuses the cached provider singleton
+        self.openai_client = getattr(get_provider(), '_client', None)
 
         if not self.ws_client_socket:
             logger.warning("WS client %s not found in registry", ws_client_id)

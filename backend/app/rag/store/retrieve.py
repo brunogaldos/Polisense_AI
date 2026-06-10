@@ -7,7 +7,10 @@ CLI (standalone validation):
 """
 import argparse
 
-from weaviate.classes.query import Filter, MetadataQuery
+try:
+    from weaviate.classes.query import Filter, MetadataQuery
+except ImportError:
+    Filter = MetadataQuery = None  # weaviate not installed; retrieve() raises on call
 
 from app.rag.config import COLLECTION_NAME
 from app.rag.embedder import Embedder
@@ -79,6 +82,8 @@ def retrieve(
     rerank: bool = True,
 ) -> list[dict]:
     """Retrieve relevant chunks from Weaviate, scoped to a conversation/document."""
+    if Filter is None:
+        raise ImportError("weaviate-client is not installed. Run: pip install weaviate-client")
     embedder = Embedder()
     vector = embedder.embed(query)
     filters = _build_filter(memory_id, document_id)

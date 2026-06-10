@@ -5,16 +5,15 @@ singleton; the first call downloads weights from HuggingFace if not cached.
 These calls are blocking/CPU-bound — call them via asyncio.to_thread from the
 async backend so they don't block the event loop.
 """
-from sentence_transformers import SentenceTransformer
-
 from app.rag.config import BGE_MODEL_NAME, BATCH_SIZE, EMBED_DEVICE
 
 
 class Embedder:
-    _model: SentenceTransformer | None = None
+    _model = None
 
-    def _get_model(self) -> SentenceTransformer:
+    def _get_model(self):
         if self._model is None:
+            from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(BGE_MODEL_NAME, device=EMBED_DEVICE)
         return self._model
 

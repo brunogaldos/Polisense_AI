@@ -27,8 +27,7 @@ from app.chatbot.geo_utils import (
     format_int_locale,
     lat_lon_to_utm,
 )
-from app.chatbot.router import PsRagRouter
-from app.rag.providers import generation_is_local, get_generation_provider, get_provider
+from app.rag.providers import get_generation_provider, get_provider
 from app.services.firestore_memory_service import FirestoreMemoryService
 
 logger = logging.getLogger("polisense.chatbot")
@@ -44,6 +43,10 @@ class SkillsFirstChatBot(PsBaseChatBot):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.persist_memory = True
+        # When set to a list, _stream_aggregated_response appends text here
+        # instead of sending it over WS. Used by the ADK geo tool to capture
+        # the geo handler's text output so the ADK model can return it.
+        self._geo_text_capture: Optional[list] = None
 
     # ─── History assembly ──────────────────────────────────────────────────────
 
@@ -178,29 +181,27 @@ GROUNDING:
                 citations.append({"title": title, "page": page})
         return "\n\n---\n\n".join(parts), citations
 
-    async def _retrieve_local_context(
-        self, user_last_message: str, routing_data: dict[str, Any]
+    async def _retrieve_vertex_rag_context(
+        self, user_last_message: str, routing_data: dict[str, Any], corpus_name: str
     ) -> tuple[Optional[str], list[dict[str, Any]]]:
-        """Run the local Weaviate retrieve for this turn (RAG_RETRIEVAL=local).
+        """Query the Vertex AI RAG corpus for this turn.
         Returns (context_block, citations) or (None, []) when nothing is found."""
-        from app.rag.store.retrieve import retrieve
+        from app.services.vertex_rag_service import VertexRagService
 
         query = (routing_data.get("rewrittenUserQuestionVectorDatabaseSearch") or "").strip() or user_last_message
-        top_k = int(os.getenv("RAG_RETRIEVAL_TOP_K", "8"))
-        candidates = int(os.getenv("RAG_RETRIEVAL_CANDIDATES", "30"))
-        mode = os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
+        top_k = int(os.getenv("RAG_RETRIEVAL_TOP_K", "10"))
         try:
             chunks = await asyncio.to_thread(
-                retrieve, query, self.memory_id, None, mode, top_k, candidates, True
+                VertexRagService.retrieval_query, corpus_name, query, top_k
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("Local retrieval failed (%s) — answering without document context", e)
+            logger.warning("Vertex AI RAG retrieval failed (%s) — answering without document context", e)
             return None, []
         if not chunks:
-            logger.info("Local retrieval returned 0 chunks for mem=%s", self.memory_id)
+            logger.info("Vertex AI RAG returned 0 chunks for mem=%s", self.memory_id)
             return None, []
         block, citations = self._format_local_context(chunks)
-        logger.info("Local retrieval: %d chunks injected for mem=%s", len(chunks), self.memory_id)
+        logger.info("Vertex AI RAG: %d chunks injected for mem=%s", len(chunks), self.memory_id)
         return block, citations
 
     def _maybe_schedule_shadow(
@@ -217,7 +218,7 @@ GROUNDING:
             return
         if routing_data.get("intent") not in ("rag", "multi_query"):
             return
-        if not (doc_context.get("vectorStoreId") or doc_context.get("hasReadyDocuments")):
+        if not doc_context.get("hasReadyDocuments"):
             return
 
         query = (routing_data.get("rewrittenUserQuestionVectorDatabaseSearch") or "").strip() or user_last_message
@@ -274,17 +275,18 @@ GROUNDING:
             logger.error("Local generation selected but provider %s has no API key", provider.name)
             if not self.silent_mode and self.ws_client_socket:
                 await self.send_to_client(
-                    "bot", "Local generation is not configured (missing OPENROUTER_API_KEY).", "error"
+                    "bot", f"Generation provider '{provider.name}' is not configured (check credentials/API key).", "error"
                 )
             return
 
         doc_context = await DocumentContextService.build_for_conversation(self.memory_id)
         retrieved_context: Optional[str] = None
         local_citations: list[dict[str, Any]] = []
-        if self.memory_id and (doc_context.get("vectorStoreId") or doc_context.get("hasReadyDocuments")):
+        corpus_name = doc_context.get("ragCorpusName")
+        if self.memory_id and corpus_name and doc_context.get("hasReadyDocuments"):
             await self._notify_tool_start("file_search_start", "Searching uploaded documents…")
-            retrieved_context, local_citations = await self._retrieve_local_context(
-                user_last_message, routing_data
+            retrieved_context, local_citations = await self._retrieve_vertex_rag_context(
+                user_last_message, routing_data, corpus_name
             )
 
         system_prompt = self._local_system_prompt(retrieved_context)
@@ -342,6 +344,88 @@ GROUNDING:
             await self.send_to_client("bot", "", "end")
 
         logger.info("Local generation turn complete (%d chars)", len(full_text))
+
+    async def run_adk_conversation(
+        self,
+        user_last_message: str,
+        chat_log_without_last: list[dict[str, Any]],
+    ) -> None:
+        """ADK-based conversation turn. Replaces PsRagRouter + run_local_conversation.
+
+        The ADK agent decides whether to call search_documents (RAG) or
+        run_geospatial_analysis (MCP geo tools), then streams its response over WS."""
+        from app.chatbot.adk_agent import bot_ref_var, get_runner
+        from google.genai import types as genai_types
+
+        runner = get_runner()
+        session_id = self.memory_id or "anon"
+        user_id = self.user_id or "user"
+
+        # get_session returns None when the session doesn't exist yet.
+        existing = await runner.session_service.get_session(
+            app_name="polisense", user_id=user_id, session_id=session_id
+        )
+        if existing is None:
+            await runner.session_service.create_session(
+                app_name="polisense",
+                user_id=user_id,
+                session_id=session_id,
+                state={"memory_id": session_id},
+            )
+
+        new_message = genai_types.Content(
+            role="user",
+            parts=[genai_types.Part(text=user_last_message)],
+        )
+
+        full_text = ""
+        start_sent = False
+        # Inject bot reference so geo tools can call handle_geospatial_query.
+        token = bot_ref_var.set(self)
+        try:
+            async for event in runner.run_async(
+                user_id=user_id,
+                session_id=session_id,
+                new_message=new_message,
+            ):
+                if event.author != "polisense_agent":
+                    continue
+                if event.partial and event.content:
+                    for part in event.content.parts or []:
+                        delta = part.text or ""
+                        if delta:
+                            if not start_sent:
+                                start_sent = True
+                                if not self.silent_mode and self.ws_client_socket:
+                                    await self.send_to_client("bot", "", "start")
+                            full_text += delta
+                            if not self.silent_mode and self.ws_client_socket:
+                                await self.send_to_client("bot", delta)
+                elif event.is_final_response() and event.content and not start_sent:
+                    # Non-streaming path: emit the complete response at once.
+                    for part in event.content.parts or []:
+                        if part.text:
+                            full_text += part.text
+                    if full_text and not self.silent_mode and self.ws_client_socket:
+                        start_sent = True
+                        await self.send_to_client("bot", "", "start")
+                        await self.send_to_client("bot", full_text)
+        except Exception as stream_err:  # noqa: BLE001
+            logger.error("ADK stream error: %s", stream_err)
+            note = "\n\n_[Response interrupted — please retry.]_"
+            if not self.silent_mode and self.ws_client_socket and start_sent:
+                await self.send_to_client("bot", note)
+            full_text += note
+        finally:
+            bot_ref_var.reset(token)
+
+        if self.memory is not None and self.memory.get("chatLog") is not None:
+            self.memory["chatLog"].append({"sender": "bot", "message": full_text})
+            await self.save_memory_if_needed()
+        if not self.silent_mode and self.ws_client_socket:
+            await self.send_to_client("bot", "", "end")
+
+        logger.info("ADK turn complete (%d chars, mem=%s)", len(full_text), self.memory_id)
 
     async def run_multimodal_conversation(
         self,
@@ -543,7 +627,13 @@ GROUNDING:
 
     async def _stream_aggregated_response(self, response: str) -> None:
         """Chunked fake-stream of a fully-formed string + chatLog persistence.
-        Used by the geo handlers (Stage 2) and the error fallback."""
+        Used by the geo handlers (Stage 2) and the error fallback.
+        When _geo_text_capture is set (ADK geo tool mode), text is captured
+        instead of sent so the ADK model can incorporate it in its reply."""
+        if self._geo_text_capture is not None:
+            self._geo_text_capture.append(response)
+            return
+
         if self.silent_mode or not self.ws_client_socket:
             # Still persist so the conversation stays coherent on reload.
             if self.memory is not None and self.memory.get("chatLog") is not None:
@@ -801,7 +891,7 @@ GROUNDING:
 
             # 3 — ask the LLM which tool to call.
             llm_response = await self.openai_client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=os.getenv("ROUTER_MODEL", "gpt-4o-mini"),
                 max_tokens=4096,
                 temperature=0,
                 tools=open_ai_tools,
@@ -1299,23 +1389,16 @@ GROUNDING:
         logger.info("MESSAGE [%s] — %s", _sender, user_last_message[:200])
         chat_log_without_last = chat_log[:-1]
 
-        router = PsRagRouter(get_provider())
-        routing_data = await router.get_routing_data(
-            user_last_message, data_layout, json.dumps(chat_log_without_last, default=str)
-        )
-        logger.info(
-            "ROUTING — intent=%s category=%r rewritten=%r",
-            routing_data.get("intent", "rag"),
-            routing_data.get("primaryCategory", ""),
-            (routing_data.get("rewrittenUserQuestionVectorDatabaseSearch") or "")[:120],
-        )
-
-        if not self.openai_client:
-            logger.error("OpenAI client not initialized (check OPENAI_API_KEY)")
-            await self.send_agent_start("Error: OpenAI client not configured")
+        if not get_provider().available:
+            logger.error("No LLM provider available — check API keys/credentials")
+            await self.send_agent_start("Error: LLM not configured")
             return
 
-        # DEEP ANALYSIS — bypasses the router (run_deep_analysis MCP tool).
+        # ── Explicit map-operation triggers (bypass ADK for reliability) ──────
+        # These regex patterns catch clearly-scoped geo operations before the
+        # ADK agent sees the message, ensuring fast map rendering without an
+        # extra routing step.
+
         deep_analysis = re.compile(
             r"make\s+a?\s*deep\s+analysis|run\s+a?\s*(full|deep|detailed)?\s*analysis|"
             r"show\s+(a\s+)?(detailed|full|deep)\s+analysis|generate\s+(the\s+)?analysis\s+report|"
@@ -1323,7 +1406,7 @@ GROUNDING:
             re.IGNORECASE,
         )
         if deep_analysis.search(user_last_message):
-            logger.info("📊 DEEP ANALYSIS mode — connecting to Geodata MCP Server")
+            logger.info("DEEP ANALYSIS — direct geo handler")
             await self.handle_geospatial_query(user_last_message)
             return
 
@@ -1335,7 +1418,7 @@ GROUNDING:
             re.IGNORECASE,
         )
         if draw_polygon.search(user_last_message):
-            logger.info("🗺️  DRAW POLYGON mode — extracting UTM coordinates")
+            logger.info("DRAW POLYGON — direct geo handler")
             await self.handle_draw_polygon_from_document(user_last_message)
             return
 
@@ -1354,25 +1437,17 @@ GROUNDING:
             )
         )
         if overlap_trigger:
-            logger.info("🔎 OVERLAP ANALYSIS mode — querying concessions near polygon centroid")
+            logger.info("OVERLAP ANALYSIS — direct geo handler")
             await self.handle_overlap_analysis(user_last_message)
             return
 
-        if routing_data.get("intent") == "geospatial":
-            logger.info("Using GEOSPATIAL mode — connecting to Geodata MCP Server")
-            await self.handle_geospatial_query(user_last_message)
-            return
-
-        # rag / multi_query / conversational → generation pipeline.
-        # RAG_GENERATION=local routes to the OpenRouter path (no hosted tools);
-        # default stays on the OpenAI Responses multimodal pipeline.
+        # ── ADK agent handles everything else ────────────────────────────────
+        # The agent decides whether to call search_documents (RAG) or
+        # run_geospatial_analysis (geo) based on the user's message.
         try:
-            if generation_is_local():
-                await self.run_local_conversation(user_last_message, routing_data, chat_log_without_last)
-            else:
-                await self.run_multimodal_conversation(user_last_message, routing_data, chat_log_without_last)
+            await self.run_adk_conversation(user_last_message, chat_log_without_last)
         except Exception as err:  # noqa: BLE001
-            logger.exception("Conversation generation failed")
+            logger.exception("ADK conversation failed")
             if not self.silent_mode and self.ws_client_socket:
                 await self.send_to_client(
                     "bot", "There was an error generating the response. Please try again.", "error"

@@ -17,7 +17,6 @@ import time
 from datetime import datetime, timezone
 
 from app.rag.config import cache_dir
-from app.rag.store.retrieve import retrieve
 
 logger = logging.getLogger("polisense.rag")
 
@@ -30,6 +29,7 @@ def shadow_enabled() -> bool:
 
 def record_shadow(query: str, memory_id: str) -> dict:
     """Run local retrieval and return a structured comparison record."""
+    from app.rag.store.retrieve import retrieve
     mode = os.getenv("RAG_SHADOW_MODE", "hybrid")
     top_k = int(os.getenv("RAG_SHADOW_TOP_K", "8"))
     candidates = int(os.getenv("RAG_SHADOW_CANDIDATES", "30"))

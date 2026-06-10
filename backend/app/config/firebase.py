@@ -27,7 +27,9 @@ _PROJECT_ID = os.getenv("FIREBASE_PROJECT_ID", "sturdy-quarter-479808-p0")
 
 def _service_account_candidates() -> list[str]:
     return [
-        os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""),
+        # Dedicated Firebase key takes priority — keeps Firebase and Gemini credentials separate.
+        os.getenv("FIREBASE_SERVICE_ACCOUNT_KEY", ""),
+        # Legacy / fallback paths.
         str(Path.cwd() / "serviceAccountKey.json"),
         str(_BACKEND_PY / "serviceAccountKey.json"),
         str(_BACKEND_PY.parent / "serviceAccountKey.json"),
