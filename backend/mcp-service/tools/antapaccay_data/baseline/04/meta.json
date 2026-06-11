@@ -1,0 +1,16 @@
+{
+  "mine_name": "antapaccay",
+  "month": 4,
+  "baseline_source": "MODIS/061/MOD13Q1",
+  "baseline_start": "2019-01-01",
+  "baseline_end": "2020-12-31",
+  "n_images": 4,
+  "buffer_km": 7,
+  "scale": 250,
+  "generated_at": "2026-06-11T22:01:23Z",
+  "feature_counts": {
+    "anomaly": 1,
+    "vci": 599
+  },
+  "note": "Baseline polygons built from MODIS 250m composites. P10/P50/P90 stored per polygon for Sentinel-2 reclassification at query time."
+}

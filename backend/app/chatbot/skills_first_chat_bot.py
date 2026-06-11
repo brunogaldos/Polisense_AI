@@ -1085,83 +1085,73 @@ GROUNDING:
                 await self._stream_aggregated_response(brief)
 
         elif tool_name in ("generate_mine_ndvi_geojson", "generate_mine_ndvi_geojson_inline"):
-            layer_order = [
-                "mine_point",
-                "buffer",
-                "severe_extreme",
-                "stress_class",
-                "vci",
-                "anomaly",
-            ]
-            layer_titles = {
-                "mine_point": "Mine point",
-                "buffer": "NDVI analysis buffer",
-                "anomaly": "NDVI anomaly",
-                "vci": "Vegetation Condition Index",
-                "stress_class": "Vegetation stress class",
-                "severe_extreme": "Severe/extreme vegetation stress",
-            }
+                        layer_titles = {
+                            "stress_class": "Vegetation stress class",
+                        }
 
-            raw_layers = tool_result.get("layers") or {}
-            geojson_layers: dict[str, Any] = {}
-            if tool_name == "generate_mine_ndvi_geojson":
-                for layer_name, path in raw_layers.items():
-                    try:
-                        geojson_layers[layer_name] = json.loads(Path(path).read_text(encoding="utf-8"))
-                    except Exception as fs_err:  # noqa: BLE001
-                        logger.warning("[geo] Could not read NDVI GeoJSON file %s: %s", path, fs_err)
-            else:
-                geojson_layers = {
-                    name: geojson
-                    for name, geojson in raw_layers.items()
-                    if isinstance(geojson, dict)
-                }
+                        raw_layers = tool_result.get("layers") or {}
+                        geojson_layers: dict[str, Any] = {
+                            name: geojson
+                            for name, geojson in raw_layers.items()
+                            if isinstance(geojson, dict)
+                        }
 
-            ordered_names = [name for name in layer_order if name in geojson_layers]
-            ordered_names.extend(name for name in geojson_layers.keys() if name not in ordered_names)
+                        ordered_names = list(geojson_layers.keys())
 
-            sent_count = 0
-            total_features = 0
-            for layer_name in ordered_names:
-                geojson = geojson_layers.get(layer_name)
-                features = geojson.get("features") if isinstance(geojson, dict) else None
-                if not features:
-                    continue
-                sent_count += 1
-                total_features += len(features)
-                render_type = "pins" if layer_name == "mine_point" else "polygons"
-                await self._send_bot_data(
-                    "map_concessions",
-                    {
-                        "geojson": geojson,
-                        "buffer": None,
-                        "place": layer_titles.get(layer_name, layer_name),
-                        "radiusKm": tool_result.get("buffer_km") or tool_args.get("buffer_km"),
-                        "count": len(features),
-                        "renderType": render_type,
-                        "pinColor": "black",
-                    },
-                )
+                        sent_count = 0
+                        total_features = 0
+                        for layer_name in ordered_names:
+                            geojson = geojson_layers.get(layer_name)
+                            features = geojson.get("features") if isinstance(geojson, dict) else None
+                            if not features:
+                                continue
+                            sent_count += 1
+                            total_features += len(features)
+                            await self._send_bot_data(
+                            "map_concessions",
+                            {
+                                "geojson": geojson,
+                                "buffer": None,
+                                "place": layer_titles.get(layer_name, layer_name),
+                                "radiusKm": tool_result.get("buffer_km") or tool_args.get("buffer_km"),
+                                "count": len(features),
+                                "renderType": "polygons",
+                                "classProperty": "stress_class",
+                                "colorMap": {
+                                    0: "#2ecc71",  # normal/healthy — green
+                                    1: "#f1c40f",  # mild stress — yellow
+                                    2: "#e67e22",  # moderate stress — orange
+                                    3: "#e74c3c",  # severe stress — red
+                                    4: "#8e44ad",  # extreme stress — purple
+                                },
+                            },
+                        )
 
-            mine_name = tool_result.get("mine_name") or tool_args.get("mine_name") or "mine"
-            month = tool_result.get("month") or tool_args.get("month")
-            year = tool_result.get("year") or tool_args.get("year")
-            feature_counts = tool_result.get("feature_counts") or {}
-            count_lines = [
-                f"- {layer_titles.get(name, name)}: {feature_counts[name]}"
-                for name in ordered_names
-                if name in feature_counts
-            ]
-            if sent_count:
-                brief = (
-                    f"Generated NDVI vegetation-stress layers for **{mine_name}** "
-                    f"({month}/{year}) and added **{sent_count}** layer(s) to the map.\n\n"
-                    + ("\n".join(count_lines) if count_lines else f"Total features rendered: {total_features}")
-                )
-            else:
-                brief = "The NDVI analysis completed, but no renderable GeoJSON features were produced."
-            if not self.silent_mode:
-                await self._stream_aggregated_response(brief)
+                        mine_name = tool_result.get("mine_name") or tool_args.get("mine_name") or "mine"
+                        month = tool_result.get("month") or tool_args.get("month")
+                        year = tool_result.get("year") or tool_args.get("year")
+                        feature_counts = tool_result.get("feature_counts") or {}
+                        count_lines = [
+                            f"- {layer_titles.get(name, name)}: {feature_counts[name]}"
+                            for name in ordered_names
+                            if name in feature_counts
+                        ]
+
+                        if sent_count:
+                                brief = (
+                                    f"Generated vegetation stress analysis for **{mine_name}** "
+                                    f"({month}/{year}) and added the stress class layer to the map.\n\n"
+                                    f"- Normal/healthy polygons: {sum(1 for f in geojson_layers.get('stress_class', {}).get('features', []) if (f.get('properties') or {}).get('stress_class') == 0)}\n"
+                                    f"- Mild stress: {sum(1 for f in geojson_layers.get('stress_class', {}).get('features', []) if (f.get('properties') or {}).get('stress_class') == 1)}\n"
+                                    f"- Moderate stress: {sum(1 for f in geojson_layers.get('stress_class', {}).get('features', []) if (f.get('properties') or {}).get('stress_class') == 2)}\n"
+                                    f"- Severe stress: {sum(1 for f in geojson_layers.get('stress_class', {}).get('features', []) if (f.get('properties') or {}).get('stress_class') == 3)}\n"
+                                    f"- Extreme stress: {sum(1 for f in geojson_layers.get('stress_class', {}).get('features', []) if (f.get('properties') or {}).get('stress_class') == 4)}\n"
+                                )
+                        else:
+                            brief = "The NDVI analysis completed, but no renderable GeoJSON features were produced."
+
+                        if not self.silent_mode:
+                            await self._stream_aggregated_response(brief)
 
         elif tool_name == "run_deep_analysis":
             panels = tool_result.get("panels")

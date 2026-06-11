@@ -31,10 +31,8 @@ for _p in (_HERE, os.path.join(_HERE, "tools")):
 from mcp.server.fastmcp import FastMCP
 from tools.geocode import geocode_address
 from tools.geocatmin_spatial import retrieve_mining_concessions
-from tools.mine_ndvi import (
-    DEFAULT_BASELINE_END,
-    DEFAULT_BASELINE_START,
-    generate_mine_ndvi_geojson as _generate_mine_ndvi_geojson,
+from tools.antapaccay_mcp_modis_current_and_baseline import (
+    generate_mine_ndvi_geojson as _generate_mine_ndvi_geojson, DEFAULT_BASELINE_DATA_DIR, MODIS_SCALE
 )
 from tools.polygon_from_document import polygon_from_utm_vertices, _utm_to_latlon
 
@@ -438,52 +436,48 @@ def generate_mine_ndvi_geojson(
     lat: float,
     year: int,
     month: int,
-    mine_name: str = "mine",
+    mine_name: str = "antapaccay",
     buffer_km: float = 7.0,
-    baseline_start: str = DEFAULT_BASELINE_START,
-    baseline_end: str = DEFAULT_BASELINE_END,
-    scale: int = 30,
-    min_patch_ha: float = 5.0,
-    max_features: int = 5000,
+    baseline_data_dir: str = DEFAULT_BASELINE_DATA_DIR,
+    scale: int = MODIS_SCALE,
+    max_features: int = 1000,
 ) -> dict:
     """
-    Generate Mapbox-ready GeoJSON files for vegetation stress around a mine.
+    Generate Mapbox-ready stress class GeoJSON for vegetation health around a mine.
 
-    Use this when the user asks for NDVI, vegetation stress, anomaly, VCI,
-    Sentinel-2, or mine-environment vegetation-health analysis around a known
-    mine coordinate. The tool writes separate GeoJSON files for the mine point,
-    buffer, NDVI anomaly, VCI class, stress class, and severe/extreme patches.
+    Use this when the user asks for NDVI, vegetation stress, or mine-environment
+    vegetation-health analysis around the Antapaccay mine coordinate.
 
     Args:
         lon: Mine longitude in WGS84 decimal degrees.
         lat: Mine latitude in WGS84 decimal degrees.
         year: Current analysis year.
         month: Current analysis month, 1-12.
-        mine_name: Display/file prefix for this mine.
-        buffer_km: Radius around the mine to analyze.
-        baseline_start: Start date for the historical baseline.
-        baseline_end: End date for the historical baseline.
-        scale: Sentinel-2 vectorization scale in meters.
-        min_patch_ha: Minimum severe/extreme patch size in hectares.
-        max_features: Maximum polygons per output layer.
+        mine_name: Display label for this mine.
+        buffer_km: Radius around the mine to analyze in kilometers.
+        baseline_data_dir: Directory containing precomputed baseline files.
+        scale: Vectorization scale in meters. 250 = native MODIS resolution.
+        max_features: Maximum polygons returned.
     """
     try:
-        return _generate_mine_ndvi_geojson(
+        result = _generate_mine_ndvi_geojson(
             lon=lon,
             lat=lat,
             year=year,
             month=month,
             mine_name=mine_name,
             buffer_km=buffer_km,
-            baseline_start=baseline_start,
-            baseline_end=baseline_end,
+            baseline_data_dir=baseline_data_dir,
             scale=scale,
-            min_patch_ha=min_patch_ha,
             max_features=max_features,
         )
-    except Exception as exc:
-        return {"ok": False, "error": f"NDVI GeoJSON generation failed: {exc}"}
+        return result
 
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": f"NDVI GeoJSON generation failed: {exc}",
+        }
 
 
 # ---------------------------------------------------------------------------
