@@ -37,12 +37,15 @@ COPY backend/mcp-service/server.py  ./mcp-service/server.py
 COPY backend/mcp-service/tools/     ./mcp-service/tools/
 COPY backend/mcp-service/data/      ./mcp-service/data/
 
-# ── Credentials and start script ─────────────────────────────────────────────
-COPY backend/serviceAccountKey.json ./serviceAccountKey.json
-COPY backend/.env        ./.env
-COPY backend/start.sh          ./start.sh
-RUN chmod +x start.sh
+# ── Credentials and start scripts ────────────────────────────────────────────
+COPY backend/serviceAccountKey.json      ./serviceAccountKey.json
+COPY backend/google_serviceAccountKey.json ./google_serviceAccountKey.json
+COPY backend/.env                        ./.env
+COPY backend/.env.production             ./.env.production
+COPY backend/start.sh                    ./start.sh
+COPY backend/start-prod.sh               ./start-prod.sh
+RUN chmod +x start.sh start-prod.sh
 
-EXPOSE 5029
+EXPOSE 8080
 
-CMD ["./start.sh"]
+CMD ["./start-prod.sh"]
