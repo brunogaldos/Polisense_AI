@@ -1,15 +1,10 @@
 import json
-from pathlib import Path
+import os
 
 try:
     import ee
-except ImportError: 
+except ImportError:
     ee = None
-import os
-import json
-from dotenv import load_dotenv
-
-load_dotenv("backend\env_ee")
 
 S2_COLLECTION = "COPERNICUS/S2_SR_HARMONIZED"
 S2_SCALE = 10000.0
@@ -46,23 +41,17 @@ VCI_CLASS_LABELS = {
 
 
 def initialize_earth_engine():
-    project = os.getenv("EE_PROJECT")
-    service_account = os.getenv("EE_SERVICE_ACCOUNT")
-    key_json = os.getenv("EE_KEY_JSON")
-    key_data = json.loads(key_json)
-    credentials = ee.ServiceAccountCredentials(
-    service_account,
-    key_data=json.dumps(key_data)
-    )
-    
-
     if ee is None:
         raise RuntimeError(
             "earthengine-api is not installed in the MCP service environment. "
             "Install backend/mcp-service/requirements.txt before using NDVI tools."
         )
-    else:
-        ee.Initialize(credentials=credentials, project=project)
+    project = os.getenv("EE_PROJECT")
+    service_account = os.getenv("EE_SERVICE_ACCOUNT")
+    key_json = os.getenv("EE_KEY_JSON")
+    key_data = json.loads(key_json)
+    credentials = ee.ServiceAccountCredentials(service_account, key_data=json.dumps(key_data))
+    ee.Initialize(credentials=credentials, project=project)
 
 
 def make_mine_region(lon, lat, buffer_km):

@@ -34,7 +34,6 @@ from tools.geocatmin_spatial import retrieve_mining_concessions
 from tools.mine_ndvi import (
     DEFAULT_BASELINE_END,
     DEFAULT_BASELINE_START,
-    DEFAULT_EE_PROJECT,
     generate_mine_ndvi_geojson as _generate_mine_ndvi_geojson,
 )
 from tools.polygon_from_document import polygon_from_utm_vertices, _utm_to_latlon
